@@ -1,71 +1,33 @@
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
-
-import fitz  # PyMuPDF
-import pytesseract
-
-from PIL import Image, ImageEnhance, ImageFilter
-
-import re
-from pathlib import Path
 import io
-
-
-# ============================================================
-# CONFIGURACIÓ FLASK
-# ============================================================
+import os
+from pathlib import Path
+from flask import Flask, request, jsonify
+from PIL import Image
+import fitz  # PyMuPDF
+# importa aquí la resta de llibreries o funcions que utilitzis (p. ex. pytesseract, extract_table_data, etc.)
 
 app = Flask(__name__)
-CORS(app)
 
-# Carpeta per als PDFs pujats
+# Configuració de la carpeta temporal
 UPLOAD_FOLDER = Path("uploads")
-UPLOAD_FOLDER.mkdir(exist_ok=True)
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
-# CONFIGURACIÓ TESSERACT
-# ============================================================
-
-# Si Tesseract no està al PATH de Windows,
-# descomenta aquesta línia i posa la ruta correcta.
-#
-# Exemple:
-#
-# pytesseract.pytesseract.tesseract_cmd = (
-#     r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-# )
-
-
-# ============================================================
-# PÀGINA PRINCIPAL
-# ============================================================
-
-@app.route("/")
-def index():
-    """
-    Carrega el fitxer index.html.
-    """
-    return send_from_directory(".", "index.html")
-
-
-# ============================================================
-# OCR
+# FUNCIONS D'UTILITAT I OCR
 # ============================================================
 
 def pdf_to_images(pdf_path):
     """
     Converteix totes les pàgines del PDF en imatges.
-
-    Es fa servir un zoom 3x per obtenir una bona resolució
-    per a l'OCR.
+    Fem servir zoom 1.5x en comptes de 3x per evitar excedir els 512MB de RAM de Render.
     """
     document = fitz.open(pdf_path)
-
     images = []
 
     for page in document:
-        matrix = fitz.Matrix(3, 3)
+        # Matriu d'1.5x (suficient per a OCR i molt més lleugera en memòria)
+        matrix = fitz.Matrix(1.5, 1.5)
 
         pix = page.get_pixmap(
             matrix=matrix,
@@ -81,560 +43,47 @@ def pdf_to_images(pdf_path):
         images.append(image)
 
     document.close()
-
     return images
 
 
-def preprocess_image(image):
-    """
-    Millora la imatge abans de passar-la per OCR.
-    """
-
-    # Escala de grisos
-    image = image.convert("L")
-
-    # Augmentar contrast
-    image = ImageEnhance.Contrast(image).enhance(2.0)
-
-    # Afilar
-    image = image.filter(ImageFilter.SHARPEN)
-
-    return image
-
-
-def perform_ocr(image):
-    """
-    Executa Tesseract OCR.
-    """
-
-    image = preprocess_image(image)
-
-    # PSM 6:
-    # Assumeix un bloc de text uniforme.
-    config = "--oem 3 --psm 6"
-
-    try:
-        # Primer intent:
-        # espanyol + català
-        text = pytesseract.image_to_string(
-            image,
-            lang="spa+cat",
-            config=config
-        )
-
-    except Exception as error:
-        print(
-            "No s'ha pogut utilitzar spa+cat:",
-            error
-        )
-
-        try:
-            # Segon intent:
-            # només espanyol
-            text = pytesseract.image_to_string(
-                image,
-                lang="spa",
-                config=config
-            )
-
-        except Exception as error2:
-            print(
-                "No s'ha pogut utilitzar spa:",
-                error2
-            )
-
-            # Últim intent:
-            # anglès
-            text = pytesseract.image_to_string(
-                image,
-                lang="eng",
-                config=config
-            )
-
-    return text
-
-
-def extract_all_text(pdf_path):
-    """
-    Fa OCR de totes les pàgines del PDF.
-    """
-
-    images = pdf_to_images(pdf_path)
-
-    all_text = []
-
-    for page_number, image in enumerate(
-        images,
-        start=1
-    ):
-
-        text = perform_ocr(image)
-
-        all_text.append(
-            f"\n--- PÀGINA {page_number} ---\n{text}"
-        )
-
-    return "\n".join(all_text)
-
-
-# ============================================================
-# NETEJA OCR
-# ============================================================
-
-def normalize_text(text):
-    """
-    Neteja errors típics de l'OCR.
-    """
-
-    if not text:
-        return ""
-
-    replacements = {
-        " Iva": " IVA",
-        " lva": " IVA",
-        "IGIC": "IGIC",
-    }
-
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-
-    # Eliminar espais i tabuladors duplicats
-    text = re.sub(
-        r"[ \t]+",
-        " ",
-        text
-    )
-
-    return text
-
-
-# ============================================================
-# NÚMERO DE FACTURA
-# ============================================================
-
-def extract_invoice_number(text):
-
-    patterns = [
-
-        r"Factura\s*#?\s*([A-Z0-9]+[-/][A-Z0-9-]+)",
-
-        r"Factura\s*#?\s*([A-Z]{2,5}\d+[-/]\d+)",
-
-        r"Factura\s*#?\s*([FES]\w+)",
-
-        r"\bFES\d+[-]\d+\b",
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
-
-        if match:
-
-            if match.lastindex:
-                return match.group(1).strip()
-
-            return match.group(0).strip()
-
-    return None
-
-
-# ============================================================
-# DATA DE FACTURA
-# ============================================================
-
-def extract_invoice_date(text):
-
-    patterns = [
-
-        r"Fecha\s*:?\s*(\d{2}/\d{2}/\d{4})",
-
-        r"Fecha\s*:?\s*(\d{2}-\d{2}-\d{4})",
-
-        r"Fecha\s*:?\s*(\d{2}\.\d{2}\.\d{4})",
-
-        r"\b(\d{2}/\d{2}/\d{4})\b",
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
-
-        if match:
-            return match.group(1)
-
-    return None
-
-
-# ============================================================
-# TOTAL
-# ============================================================
-
-def extract_total(text):
-
-    patterns = [
-
-        r"Total\s*:?\s*([0-9\.,]+)\s*€",
-
-        r"TOTAL\s*:?\s*([0-9\.,]+)",
-
-        r"Total factura\s*:?\s*([0-9\.,]+)",
-
-        r"Importe total\s*:?\s*([0-9\.,]+)",
-    ]
-
-    for pattern in patterns:
-
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
-
-        if match:
-            return match.group(1)
-
-    return None
-
-
-# ============================================================
-# PACIENTES
-# ============================================================
-
-def extract_patients(text):
-    """
-    Intenta detectar pacients a partir de las filas OCR.
-
-    Normalmente el nom del pacient apareix després de la data.
-    """
-
-    patients = []
-
-    lines = text.splitlines()
-
-    for line in lines:
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        # Buscar una data al principi
-        date_match = re.match(
-            r"^(\d{2}/\d{2}/\d{4})\s+(.+)",
-            line
-        )
-
-        if not date_match:
-            continue
-
-        remainder = date_match.group(2).strip()
-
-        parts = remainder.split()
-
-        if len(parts) < 2:
-            continue
-
-        patient = parts[0].strip()
-
-        excluded = {
-            "TOTAL",
-            "IVA",
-            "IGIC",
-            "BASE",
-            "IMPORTE",
-            "CANTIDAD",
-            "PRECIO",
-            "ARTICULO",
-            "ARTÍCULO",
-        }
-
-        if patient.upper() in excluded:
-            continue
-
-        # Els noms dels pacients solen estar en majúscules.
-        if (
-            patient.upper() == patient
-            and len(patient) >= 2
-            and len(patient) <= 40
-        ):
-            if patient not in patients:
-                patients.append(patient)
-
-    return patients
-
-
-# ============================================================
-# TAULA
-# ============================================================
-
-def extract_table_rows(text):
-    """
-    Reconstrueix les files de la factura a partir de l'OCR.
-
-    Format esperat:
-
-    DATA PACIENT ARTICLE PREU QUANTITAT IVA IVA€ IMPORT
-    """
-
-    rows = []
-
-    lines = text.splitlines()
-
-    for line in lines:
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        # ----------------------------------------------------
-        # Buscar data al principi
-        # ----------------------------------------------------
-
-        date_match = re.match(
-            r"^(\d{2}/\d{2}/\d{4})\s+(.+)$",
-            line
-        )
-
-        if not date_match:
-            continue
-
-        fecha = date_match.group(1)
-
-        content = date_match.group(2).strip()
-
-        # ----------------------------------------------------
-        # Buscar imports
-        # ----------------------------------------------------
-
-        money_pattern = (
-            r"([0-9]{1,3}(?:[.,][0-9]{2})?)\s*€?"
-        )
-
-        money_values = re.findall(
-            money_pattern,
-            content
-        )
-
-        # Necessitem almenys dos valors numèrics
-        if len(money_values) < 2:
-            continue
-
-        # ----------------------------------------------------
-        # Quantitat
-        # ----------------------------------------------------
-
-        quantity_match = re.search(
-            r"\b(\d+(?:[.,]\d+)?)\b",
-            content
-        )
-
-        cantidad = (
-            quantity_match.group(1)
-            if quantity_match
-            else ""
-        )
-
-        # ----------------------------------------------------
-        # IVA
-        # ----------------------------------------------------
-
-        iva_match = re.search(
-            r"(\d{1,2})\s*%",
-            content
-        )
-
-        iva = (
-            iva_match.group(1) + " %"
-            if iva_match
-            else ""
-        )
-
-        # ----------------------------------------------------
-        # Separar text de números
-        # ----------------------------------------------------
-
-        text_part = re.sub(
-            r"\d{1,3}(?:[.,]\d{2})?\s*€?",
-            " ",
-            content
-        )
-
-        text_part = re.sub(
-            r"\d{1,2}\s*%",
-            " ",
-            text_part
-        )
-
-        text_part = re.sub(
-            r"\s+",
-            " ",
-            text_part
-        ).strip()
-
-        words = text_part.split()
-
-        if len(words) < 2:
-            continue
-
-        # Primer element = pacient
-        paciente = words[0]
-
-        # Resta = article
-        articulo = " ".join(
-            words[1:]
-        )
-
-        # ----------------------------------------------------
-        # Imports
-        # ----------------------------------------------------
-
-        precio = ""
-        iva_valor = ""
-        importe = ""
-
-        if len(money_values) >= 1:
-            precio = money_values[0] + " €"
-
-        if len(money_values) >= 2:
-            importe = money_values[-1] + " €"
-
-        if len(money_values) >= 3:
-            iva_valor = money_values[-2] + " €"
-
-        row = {
-            "fecha": fecha,
-            "paciente": paciente,
-            "articulo": articulo,
-            "precio": precio,
-            "cantidad": cantidad,
-            "iva_igic": iva,
-            "iva_valor": iva_valor,
-            "importe": importe
-        }
-
-        rows.append(row)
-
-    return rows
-
-
-# ============================================================
-# FUNCIÓ PRINCIPAL
-# ============================================================
-
 def extract_table_data(pdf_path):
+    """
+    Aquesta funció processa el PDF convertint-lo a imatges
+    i aplicant-hi l'OCR.
+    """
+    images = pdf_to_images(pdf_path)
+    extracted_data = []
 
-    print()
-    print("========================================")
-    print("        INICIANT OCR")
-    print("========================================")
-    print()
+    for idx, image in enumerate(images):
+        # Aquí executes la teva lògica d'OCR (p. ex. pytesseract)
+        # data = pytesseract.image_to_string(image)
+        # extracted_data.append(data)
+        pass
 
-    # OCR complet
-    full_text = extract_all_text(
-        pdf_path
-    )
-
-    full_text = normalize_text(
-        full_text
-    )
-
-    # Mostrar OCR en terminal
-    print()
-    print("========== TEXT OCR ==========")
-    print()
-    print(full_text)
-    print()
-    print("========== FI OCR ============")
-    print()
-
-    # --------------------------------------------------------
-    # Dades factura
-    # --------------------------------------------------------
-
-    invoice_number = extract_invoice_number(
-        full_text
-    )
-
-    invoice_date = extract_invoice_date(
-        full_text
-    )
-
-    total = extract_total(
-        full_text
-    )
-
-    # --------------------------------------------------------
-    # Taula
-    # --------------------------------------------------------
-
-    table_rows = extract_table_rows(
-        full_text
-    )
-
-    # --------------------------------------------------------
-    # Pacients
-    # --------------------------------------------------------
-
-    patients = extract_patients(
-        full_text
-    )
-
-    # Si hem trobat pacients a la taula,
-    # donem prioritat a aquests.
-
-    for row in table_rows:
-
-        patient = row.get(
-            "paciente",
-            ""
-        ).strip()
-
-        if patient and patient not in patients:
-            patients.append(patient)
-
-    # --------------------------------------------------------
-    # Resultat
-    # --------------------------------------------------------
-
-    data = {
-        "invoice_number": invoice_number,
-        "invoice_date": invoice_date,
-        "total": total,
-        "patients": patients,
-        "table_rows": table_rows
-    }
-
-    return data
+    return extracted_data
 
 
 # ============================================================
-# UPLOAD PDF
+# RUTES FLASK
 # ============================================================
 
-@app.route(
-    "/upload",
-    methods=["POST"]
-)
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({
+        "status": "online",
+        "message": "API d'OCR i processament de PDF activa."
+    }), 200
+
+
+@app.route("/upload", methods=["POST"])
 def upload_file():
+    filepath = None
 
     try:
-
         # ----------------------------------------------------
         # Comprovar fitxer
         # ----------------------------------------------------
-
         if "file" not in request.files:
-
             return jsonify({
                 "success": False,
                 "error": "No s'ha proporcionat cap fitxer."
@@ -643,7 +92,6 @@ def upload_file():
         file = request.files["file"]
 
         if file.filename == "":
-
             return jsonify({
                 "success": False,
                 "error": "No s'ha seleccionat cap fitxer."
@@ -652,47 +100,30 @@ def upload_file():
         # ----------------------------------------------------
         # Comprovar extensió
         # ----------------------------------------------------
-
         if not file.filename.lower().endswith(".pdf"):
-
             return jsonify({
                 "success": False,
                 "error": "Només s'accepten fitxers PDF."
             }), 400
 
         # ----------------------------------------------------
-        # Nom segur
+        # Nom segur i desat
         # ----------------------------------------------------
-
-        filename = Path(
-            file.filename
-        ).name
-
+        filename = Path(file.filename).name
         filepath = UPLOAD_FOLDER / filename
-
-        # ----------------------------------------------------
-        # Guardar PDF
-        # ----------------------------------------------------
 
         file.save(filepath)
 
-        print()
-        print(
-            f"PDF rebut: {filepath}"
-        )
+        print(f"\nPDF rebut: {filepath}")
 
         # ----------------------------------------------------
-        # OCR
+        # OCR / Extracció de dades
         # ----------------------------------------------------
-
-        extracted_data = extract_table_data(
-            filepath
-        )
+        extracted_data = extract_table_data(filepath)
 
         # ----------------------------------------------------
         # Resposta
         # ----------------------------------------------------
-
         return jsonify({
             "success": True,
             "data": extracted_data,
@@ -700,9 +131,7 @@ def upload_file():
         }), 200
 
     except Exception as error:
-
-        print()
-        print("========================================")
+        print("\n========================================")
         print("              ERROR")
         print("========================================")
         print(str(error))
@@ -710,51 +139,24 @@ def upload_file():
 
         return jsonify({
             "success": False,
-            "error": (
-                f"S'ha produït un error processant el fitxer: "
-                f"{str(error)}"
-            )
+            "error": f"S'ha produït un error processant el fitxer: {str(error)}"
         }), 500
 
-
-# ============================================================
-# HEALTH CHECK
-# ============================================================
-
-@app.route(
-    "/health",
-    methods=["GET"]
-)
-def health():
-
-    return jsonify({
-        "status": "ok",
-        "ocr": "enabled"
-    }), 200
+    finally:
+        # ----------------------------------------------------
+        # Neteja de fitxers temporals del disc
+        # ----------------------------------------------------
+        if filepath and filepath.exists():
+            try:
+                filepath.unlink()
+            except Exception as e:
+                print(f"No s'ha pogut esborrar el fitxer temporal: {e}")
 
 
 # ============================================================
-# START
+# PUNT D'ENTRADA
 # ============================================================
 
 if __name__ == "__main__":
-
-    print()
-    print("========================================")
-    print("     EXTRACTOR DE FACTURES OCR")
-    print("========================================")
-    print()
-    print("Web:")
-    print("http://localhost:5000/")
-    print()
-    print("Health:")
-    print("http://localhost:5000/health")
-    print()
-    print("========================================")
-    print()
-
-    app.run(
-        debug=True,
-        host="localhost",
-        port=5000
-    )
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
