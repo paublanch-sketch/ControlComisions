@@ -548,7 +548,7 @@
         // CONFIGURACIÓ
         // ==============================
         // Enganxa aquí la URL de la teva Web App de Google Apps Script.
-        const GOOGLE_APPS_SCRIPT_URL = 'ENGANXA_AQUI_LA_URL_DE_LA_TEVA_WEB_APP';
+        const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbycjdR_RTZoWWGVaciJVjWb5Zpld8FSqgg9IDu54t-mi-5ChlpOFc4KM80aANP7ErE/exec';
 
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
@@ -648,10 +648,10 @@
             showLoader(true);
             hideAlert();
 
-            fetch('http://localhost:5000/upload', {
-                method: 'POST',
-                body: formData
-            })
+            fetch('/upload', {
+    method: 'POST',
+    body: formData
+})
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
@@ -807,9 +807,7 @@
                 return;
             }
 
-            if (!GOOGLE_APPS_SCRIPT_URL || GOOGLE_APPS_SCRIPT_URL.includes('ENGANXA_AQUI')) {
-                showAlert('error', '❌ Falta configurar la URL de Google Apps Script en aquest HTML');
-                return;
+            if (!GOOGLE_APPS_SCRIPT_URL || GOOGLE_APPS_SCRIPT_URL === 'ENGANXA_AQUI_LA_URL_DE_LA_TEVA_WEB_APP') {                return;
             }
 
             const payload = {
