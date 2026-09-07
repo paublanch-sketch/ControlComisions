@@ -22,12 +22,12 @@
  */
 
 const SHEETS = {
-  Roser:  'ID_GOOGLE_SHEET_ROSER',
-  Carlos: 'ID_GOOGLE_SHEET_CARLOS',
-  Laura:  'ID_GOOGLE_SHEET_LAURA',
-  Maria:  'ID_GOOGLE_SHEET_MARIA',
-  Sonia:  'ID_GOOGLE_SHEET_SONIA',
-  Sara:   'ID_GOOGLE_SHEET_SARA'
+  Roser:  'https://docs.google.com/spreadsheets/d/1kfPOe7n_FSxFoe7vJ9b16_B0Rk97yt41/edit?usp=sharing&ouid=100524916495080167263&rtpof=true&sd=true',
+  Carlos: 'https://docs.google.com/spreadsheets/d/19KnGClmAeh6ssNOeG3OBJpHqt_OS9tfE/edit?usp=sharing&ouid=100524916495080167263&rtpof=true&sd=true',
+  Laura:  'https://docs.google.com/spreadsheets/d/1yxV9l51VTabIA5GStZJYttRzp1WMEapq/edit?usp=sharing&ouid=100524916495080167263&rtpof=true&sd=true',
+  Maria:  'https://docs.google.com/spreadsheets/d/1u6VMRc_-upMpvYv24AexwrqL0bpGvAkA/edit?usp=sharing&ouid=100524916495080167263&rtpof=true&sd=true',
+  Sonia:  'https://docs.google.com/spreadsheets/d/1qow3tnt6YUqthCfhoX3tlNGvaElhr3l1/edit?usp=sharing&ouid=100524916495080167263&rtpof=true&sd=true',
+  Sara:   'https://docs.google.com/spreadsheets/d/1kJ4IhiQWbj20POk4tm36D225OqjYcLiN/edit?usp=sharing&ouid=100524916495080167263&rtpof=true&sd=true'
 };
 
 const TEMPLATE_TAB_NAME = 'PLANTILLA';
