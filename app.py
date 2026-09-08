@@ -87,7 +87,7 @@ def extract_all_text(pdf_path):
         print(f"\nPDF obert: {page_count} pàgines")
 
         if page_count > MAX_PAGES:
-            raise ValueError(f"El PDF té {page_count} pàgines. El màxim permès és {MAX_PAGES}.")
+            raise ValueError(f"El PDF té {page_count} pàgines. El màxim és {MAX_PAGES}.")
 
         for page_number in range(page_count):
             print(f"\nProcessant pàgina {page_number + 1}/{page_count}...")
@@ -143,7 +143,6 @@ def extract_invoice_number(text):
     patterns = [
         r"Factura\s*#?\s*([A-Z0-9]+[-/][A-Z0-9-]+)",
         r"Factura\s*#?\s*([A-Z]{2,5}\d+[-/]\d+)",
-        r"Factura\s*#?\s*([FES]\w+)",
         r"\bFES\d+[-]\d+\b",
     ]
     for pattern in patterns:
@@ -156,8 +155,6 @@ def extract_invoice_number(text):
 def extract_invoice_date(text):
     patterns = [
         r"Fecha\s*:?\s*(\d{2}/\d{2}/\d{4})",
-        r"Fecha\s*:?\s*(\d{2}-\d{2}-\d{4})",
-        r"Fecha\s*:?\s*(\d{2}\.\d{2}\.\d{4})",
         r"\b(\d{2}/\d{2}/\d{4})\b",
     ]
     for pattern in patterns:
@@ -168,129 +165,121 @@ def extract_invoice_date(text):
 
 
 def extract_total(text):
-    patterns = [
-        r"Total\s*:?\s*([0-9\.,]+)\s*€",
-        r"TOTAL\s*:?\s*([0-9\.,]+)",
-        r"Total factura\s*:?\s*([0-9\.,]+)",
-        r"Importe total\s*:?\s*([0-9\.,]+)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1)
+    # Buscar el total final (155,81 € / 170,00 €)
+    matches = re.findall(r"(\d{1,4}[.,]\d{2})\s*€", text)
+    if matches:
+        return matches[-1] + " €"
     return None
 
 
 def extract_patients(text):
     patients = []
-    excluded = {
-        "TOTAL", "IVA", "IGIC", "BASE", "IMPORTE",
-        "CANTIDAD", "PRECIO", "ARTICULO", "ARTÍCULO", "FACTURA", "FECHA"
-    }
-
-    for line in text.splitlines():
-        line = line.strip()
-        date_match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", line)
-        if not date_match:
-            continue
-
-        parts = line.split()
-        for part in parts:
-            clean_part = re.sub(r"[^\w]", "", part)
-            if (
-                clean_part.isupper()
-                and clean_part not in excluded
-                and len(clean_part) >= 2
-                and clean_part not in patients
-                and not clean_part.isdigit()
-            ):
-                patients.append(clean_part)
+    # Buscar la línea: Pacientes: LLUC (1541919), Macho... / ZOE (1771852)...
+    match = re.search(r"Pacientes?\s*:\s*([A-ZÀ-Úa-zà-ú]+)", text, re.IGNORECASE)
+    if match:
+        patients.append(match.group(1).upper().strip())
 
     return patients
 
 
 def extract_table_rows(text):
     rows = []
-    last_date = extract_invoice_date(text) or ""
-    decimal_pattern = r"(\d{1,4}[.,]\d{2})\s*€?"
-    excluded_keywords = ["TOTAL", "SUBTOTAL", "BASE IMPONIBLE", "VALOR", "IMPORTE TOTAL"]
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    
+    # 1. Obtener los nombres de los pacientes de la factura
+    known_patients = extract_patients(text)
+    default_date = extract_invoice_date(text) or ""
+    
+    # Palabras clave para detener la lectura de la tabla de artículos
+    stop_keywords = ["TOTAL", "SUBTOTAL", "PAGOS", "PENDIENTE DE PAGO", "TODO", "TIPO DE PAGO"]
 
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        # Evitar procesar las líneas finales de sumatorio
-        if any(keyword in line.upper() for keyword in excluded_keywords):
-            continue
-
-        # Si la línea tiene fecha, actualizar last_date
-        date_match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", line)
-        if date_match:
-            last_date = date_match.group(1)
-
-        decimal_values = re.findall(decimal_pattern, line)
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         
-        # Flexibilización: procesar si la línea contiene al menos 1 importe económico
-        if not decimal_values:
+        # Descartar cabeceras y pie de página
+        if any(keyword == line.upper() or line.upper().startswith(keyword) for keyword in stop_keywords):
+            break
+            
+        if "EXCL.IVA" in line.upper() or "ARTÍCULOS" in line.upper() or "PACIENTE" in line.upper():
+            i += 1
             continue
 
-        if len(decimal_values) >= 3:
-            precio = decimal_values[-3] + " €"
-            iva_valor = decimal_values[-2] + " €"
-            importe = decimal_values[-1] + " €"
-        elif len(decimal_values) == 2:
-            precio = decimal_values[0] + " €"
-            iva_valor = ""
-            importe = decimal_values[1] + " €"
-        else:
-            precio = decimal_values[0] + " €"
-            iva_valor = ""
-            importe = decimal_values[0] + " €"
+        # Detectar si la línea contiene importes en euros
+        decimal_matches = re.findall(r"(\d{1,4}[.,]\d{2})\s*€?", line)
+        
+        if decimal_matches:
+            # Comprobar si hay una fecha al inicio de la línea o en líneas superiores
+            fecha_match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", line)
+            fecha = fecha_match.group(1) if fecha_match else default_date
+            
+            # Buscar el paciente en la línea actual
+            paciente = ""
+            for p in known_patients:
+                if p in line.upper():
+                    paciente = p
+                    break
+            
+            if not paciente and known_patients:
+                paciente = known_patients[0]
 
-        iva_match = re.search(r"(\d{1,2})\s*%", line)
-        iva = iva_match.group(1) + " %" if iva_match else ""
+            # Extraer porcentaje IVA (%)
+            iva_match = re.search(r"(\d{1,2})\s*%", line)
+            iva = iva_match.group(1) + " %" if iva_match else "21 %"
 
-        # Limpiar precios e IVA del texto para aislar la descripción
-        content = re.sub(r"\b\d{2}/\d{2}/\d{4}\b", "", line)
-        content = re.sub(decimal_pattern, " ", content)
-        content = re.sub(r"\d{1,2}\s*%", " ", content)
-        words = re.sub(r"\s+", " ", content).strip().split()
+            # Precios
+            if len(decimal_matches) >= 3:
+                precio = decimal_matches[-3] + " €"
+                iva_valor = decimal_matches[-2] + " €"
+                importe = decimal_values = decimal_matches[-1] + " €"
+            elif len(decimal_matches) == 2:
+                precio = decimal_matches[0] + " €"
+                iva_valor = ""
+                importe = decimal_matches[1] + " €"
+            else:
+                precio = decimal_matches[0] + " €"
+                iva_valor = ""
+                importe = decimal_matches[0] + " €"
 
-        if not words:
-            continue
+            # Limpiar importes, fechas y caracteres especiales para aislar el nombre del Artículo
+            clean_text = line
+            clean_text = re.sub(r"\b\d{2}/\d{2}/\d{4}\b", "", clean_text)
+            clean_text = re.sub(r"\d{1,4}[.,]\d{2}\s*€?", "", clean_text)
+            clean_text = re.sub(r"\d{1,2}\s*%", "", clean_text)
+            
+            if paciente:
+                clean_text = re.sub(rf"\b{paciente}\b", "", clean_text, flags=re.IGNORECASE)
 
-        paciente = ""
-        # Buscar si alguna palabra coincide con un nombre de persona (en mayúsculas)
-        for word in words:
-            clean_w = re.sub(r"[^\w]", "", word)
-            if clean_w.isupper() and len(clean_w) >= 2 and not clean_w.isdigit():
-                paciente = clean_w
-                break
+            # Limpiar barras '|' procedentes de tablas en PDF
+            clean_text = clean_text.replace("|", " ")
+            words = clean_text.strip().split()
 
-        cantidad = "1"
-        rest_words = [w for w in words if w != paciente]
+            cantidad = "1"
+            # Buscar cantidad (ej. 1, 2, 1 Caja...)
+            for idx in range(len(words) - 1, -1, -1):
+                if words[idx].isdigit():
+                    cantidad = words[idx]
+                    words.pop(idx)
+                    break
+                elif "Caja" in words[idx] or "Unidad" in words[idx]:
+                    cantidad = words[idx]
 
-        for i in range(len(rest_words) - 1, -1, -1):
-            if re.fullmatch(r"\d{1,3}", rest_words[i]):
-                cantidad = rest_words[i]
-                rest_words = rest_words[:i] + rest_words[i + 1:]
-                break
+            articulo = " ".join(words).strip()
 
-        articulo = " ".join(rest_words).strip()
-        if not articulo:
-            articulo = "Concepto general"
+            # Guardar la fila si el artículo tiene un nombre coherente
+            if articulo and len(articulo) > 2 and articulo.upper() not in stop_keywords:
+                rows.append({
+                    "fecha": fecha,
+                    "paciente": paciente,
+                    "articulo": articulo,
+                    "precio": precio,
+                    "cantidad": cantidad,
+                    "iva_igic": iva,
+                    "iva_valor": iva_valor,
+                    "importe": importe
+                })
 
-        rows.append({
-            "fecha": last_date,
-            "paciente": paciente,
-            "articulo": articulo,
-            "precio": precio,
-            "cantidad": cantidad,
-            "iva_igic": iva,
-            "iva_valor": iva_valor,
-            "importe": importe
-        })
+        i += 1
 
     return rows
 
@@ -307,11 +296,6 @@ def extract_table_data(pdf_path):
     table_rows = extract_table_rows(full_text)
     patients = extract_patients(full_text)
 
-    for row in table_rows:
-        patient = row.get("paciente", "").strip()
-        if patient and patient not in patients:
-            patients.append(patient)
-
     return {
         "invoice_number": extract_invoice_number(full_text),
         "invoice_date": extract_invoice_date(full_text),
@@ -322,7 +306,7 @@ def extract_table_data(pdf_path):
 
 
 # ============================================================
-# ENDPOINTS
+# ENDPOINTS Y MANEJO DE ERRORES
 # ============================================================
 
 @app.errorhandler(413)
