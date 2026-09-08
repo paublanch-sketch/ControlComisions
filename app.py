@@ -4,13 +4,13 @@ from flask_cors import CORS
 import fitz  # PyMuPDF
 import pytesseract
 
-from PIL import Image, ImageEnhance, ImageFilter
-
+from PIL import Image, ImageEnhance
 import re
 from pathlib import Path
 import io
 import gc
 import uuid
+import os
 
 
 # ============================================================
@@ -20,39 +20,18 @@ import uuid
 app = Flask(__name__)
 CORS(app)
 
-# Carpeta per als PDFs pujats
 UPLOAD_FOLDER = Path("uploads")
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 
-# Límit màxim del PDF
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-
-# Màxim de pàgines per PDF
-#
-# Les factures d'AniCura sempre són d'1 pàgina amb aquest format
-# estàndard. Ho limitem a 5 (marge per si algun dia n'hi ha amb
-# més d'un pacient/pàgina) per protegir la RAM del pla gratuït
-# de Render (512 MB): un PDF de 30 pàgines a 3x podria fer petar
-# la memòria si algú el puja per error.
 MAX_PAGES = 5
+
+app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 
 
 # ============================================================
 # CONFIGURACIÓ TESSERACT
 # ============================================================
-
-# Si Tesseract no està al PATH de Windows,
-# descomenta aquesta línia i posa la ruta correcta.
-#
-# IMPORTANT: cal haver instal·lat Tesseract-OCR com a PROGRAMA
-# a Windows (no només "pip install pytesseract"). Descarrega'l
-# de: https://github.com/UB-Mannheim/tesseract/wiki
-#
-# pytesseract.pytesseract.tesseract_cmd = (
-#     r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-# )
-
-import os
 
 _TESSERACT_CMD = os.environ.get("TESSERACT_CMD")
 
@@ -61,26 +40,12 @@ if _TESSERACT_CMD:
 
 
 # ============================================================
-# CONFIGURACIÓ UPLOAD
-# ============================================================
-
-app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
-
-
-# ============================================================
 # PÀGINA PRINCIPAL
 # ============================================================
 
 @app.route("/")
 def index():
-    """
-    Carrega el fitxer index.html.
-    """
-
-    return send_from_directory(
-        ".",
-        "index.html"
-    )
+    return send_from_directory(".", "index.html")
 
 
 # ============================================================
@@ -91,26 +56,16 @@ def preprocess_image(image):
     """
     Millora la imatge abans de passar-la per OCR.
 
-    IMPORTANT:
-    Aquestes factures són una IMATGE dins del PDF (no tenen
-    text natiu), per això calen dues coses per llegir-les bé:
-
-    1. Renderitzar a prou resolució (veure MATRIU OCR més avall).
-    2. Binaritzar (blanc/negre pur) en lloc de només augmentar
-       contrast, que és el que feia que l'OCR anterior confongués
-       lletres i números.
+    Les factures AniCura són escanejades i mantenen sempre
+    el mateix format visual.
     """
 
-    # Escala de grisos
     image = image.convert("L")
 
-    # Augmentar contrast abans de binaritzar
     image = ImageEnhance.Contrast(
         image
     ).enhance(2.0)
 
-    # Binarització (blanc/negre pur).
-    # Llindar 180: per sota és negre, per sobre és blanc.
     threshold = 180
 
     image = image.point(
@@ -123,116 +78,30 @@ def preprocess_image(image):
 
 def perform_ocr(image):
     """
-    Executa Tesseract OCR.
-
-    IMPORTANT (Render free tier):
-
-    Fer servir dos idiomes combinats ("spa+cat") és gairebé el
-    DOBLE de lent que fer-ne servir només un, perquè Tesseract
-    ha de consultar dos diccionaris a la vegada. A la CPU tan
-    limitada (compartida) del pla gratuït de Render, això feia
-    que el procés superés els 120 segons i gunicorn el matava
-    (WORKER TIMEOUT / SIGKILL).
-
-    Com que aquestes factures són gairebé sempre en castellà,
-    fem servir només "spa" com a primera opció (molt més ràpid
-    i amb la mateixa precisió comprovada), i només si falla
-    (cas rar) provem altres combinacions.
+    OCR amb castellà.
     """
 
-    image = preprocess_image(
-        image
-    )
+    image = preprocess_image(image)
 
-    # PSM 6:
-    # Assumeix un bloc de text uniforme.
     config = "--oem 3 --psm 6"
 
-    # --------------------------------------------------------
-    # Primer intent: només espanyol (ràpid)
-    # --------------------------------------------------------
-
     try:
-
-        text = pytesseract.image_to_string(
+        return pytesseract.image_to_string(
             image,
             lang="spa",
             config=config
         )
-
-        return text
-
     except Exception as error:
-
-        print(
-            "No s'ha pogut utilitzar spa:",
-            error
-        )
-
-    # --------------------------------------------------------
-    # Segon intent: català + espanyol
-    # (només si el primer ha fallat, no per defecte)
-    # --------------------------------------------------------
+        print("Error OCR spa:", error)
 
     try:
-
-        text = pytesseract.image_to_string(
-            image,
-            lang="spa+cat",
-            config=config
-        )
-
-        return text
-
-    except Exception as error:
-
-        print(
-            "No s'ha pogut utilitzar spa+cat:",
-            error
-        )
-
-    # --------------------------------------------------------
-    # Segon intent: espanyol
-    # --------------------------------------------------------
-
-    try:
-
-        text = pytesseract.image_to_string(
-            image,
-            lang="spa",
-            config=config
-        )
-
-        return text
-
-    except Exception as error:
-
-        print(
-            "No s'ha pogut utilitzar spa:",
-            error
-        )
-
-    # --------------------------------------------------------
-    # Últim intent: anglès
-    # --------------------------------------------------------
-
-    try:
-
-        text = pytesseract.image_to_string(
+        return pytesseract.image_to_string(
             image,
             lang="eng",
             config=config
         )
-
-        return text
-
     except Exception as error:
-
-        print(
-            "No s'ha pogut utilitzar eng:",
-            error
-        )
-
+        print("Error OCR eng:", error)
         return ""
 
 
@@ -244,57 +113,30 @@ def extract_all_text(pdf_path):
     """
     Processa el PDF pàgina per pàgina.
 
-    IMPORTANT:
-
-    1. Intentem primer extreure text natiu del PDF.
-    2. Si la pàgina ja té text, NO fem OCR.
-    3. Si la pàgina és escanejada, fem OCR a 1.5x.
-    4. Mai guardem totes les imatges en RAM.
+    Com que el format és fix, utilitzem OCR només si
+    la pàgina no conté text natiu suficient.
     """
 
     document = None
-
     all_text = []
 
     try:
 
-        # ----------------------------------------------------
-        # Obrir PDF
-        # ----------------------------------------------------
+        document = fitz.open(pdf_path)
 
-        document = fitz.open(
-            pdf_path
-        )
-
-        page_count = len(
-            document
-        )
+        page_count = len(document)
 
         print()
-        print(
-            f"PDF obert: {page_count} pàgines"
-        )
-
-        # ----------------------------------------------------
-        # Comprovar número de pàgines
-        # ----------------------------------------------------
+        print(f"PDF obert: {page_count} pàgines")
 
         if page_count > MAX_PAGES:
-
             raise ValueError(
                 f"El PDF té {page_count} pàgines. "
                 f"El màxim permès és {MAX_PAGES}."
             )
 
-        # ----------------------------------------------------
-        # Processar una pàgina cada vegada
-        # ----------------------------------------------------
+        for page_number in range(page_count):
 
-        for page_number in range(
-            page_count
-        ):
-
-            print()
             print(
                 f"Processant pàgina "
                 f"{page_number + 1}/{page_count}..."
@@ -306,31 +148,23 @@ def extract_all_text(pdf_path):
 
             try:
 
-                # ------------------------------------------------
-                # Carregar pàgina
-                # ------------------------------------------------
-
                 page = document.load_page(
                     page_number
                 )
 
-                # =================================================
-                # PRIMER: INTENTAR TEXT NATIU
-                # =================================================
+                # ------------------------------------------------
+                # TEXT NATIU
+                # ------------------------------------------------
 
-                native_text = page.get_text(
-                    "text"
-                )
+                native_text = page.get_text("text")
 
-                # Si el PDF ja té text suficient,
-                # no cal fer OCR.
                 if native_text and len(
                     native_text.strip()
                 ) >= 30:
 
                     print(
                         f"Pàgina {page_number + 1}: "
-                        "text natiu detectat → sense OCR"
+                        "text natiu detectat"
                     )
 
                     all_text.append(
@@ -340,59 +174,31 @@ def extract_all_text(pdf_path):
 
                     continue
 
-                # =================================================
-                # SI NO HI HA TEXT → OCR
-                # =================================================
+                # ------------------------------------------------
+                # OCR
+                # ------------------------------------------------
 
                 print(
                     f"Pàgina {page_number + 1}: "
-                    "escanejada → executant OCR"
+                    "executant OCR"
                 )
 
-                # ------------------------------------------------
-                # RESOLUCIÓ OCR
-                #
-                # 3x: amb 1.5x el text sortia il·legible
-                # (dates com "aa082026" en lloc de "05/09/2026").
-                # A 3x, per a una factura d'una pàgina, la imatge
-                # pesa ~13 MB en RAM, cosa assumible fins i tot
-                # amb 512 MB de límit (es allibera de seguida
-                # amb gc.collect()).
-                # ------------------------------------------------
-
-                matrix = fitz.Matrix(
-                    3.0,
-                    3.0
-                )
-
-                # ------------------------------------------------
-                # Renderitzar pàgina
-                # ------------------------------------------------
+                matrix = fitz.Matrix(3.0, 3.0)
 
                 pix = page.get_pixmap(
                     matrix=matrix,
                     alpha=False
                 )
 
-                # ------------------------------------------------
-                # Convertir a PNG
-                # ------------------------------------------------
-
                 image_bytes = pix.tobytes(
                     "png"
                 )
 
                 image = Image.open(
-                    io.BytesIO(
-                        image_bytes
-                    )
+                    io.BytesIO(image_bytes)
                 )
 
                 image.load()
-
-                # ------------------------------------------------
-                # OCR
-                # ------------------------------------------------
 
                 text = perform_ocr(
                     image
@@ -405,47 +211,22 @@ def extract_all_text(pdf_path):
 
             finally:
 
-                # ------------------------------------------------
-                # Alliberar PIL
-                # ------------------------------------------------
-
                 if image is not None:
-
                     try:
                         image.close()
                     except Exception:
                         pass
 
-                # ------------------------------------------------
-                # Alliberar pixmap
-                # ------------------------------------------------
-
                 pix = None
-
-                # ------------------------------------------------
-                # Alliberar pàgina
-                # ------------------------------------------------
-
                 page = None
-
-                # ------------------------------------------------
-                # Forçar neteja RAM
-                # ------------------------------------------------
 
                 gc.collect()
 
-        return "\n".join(
-            all_text
-        )
+        return "\n".join(all_text)
 
     finally:
 
-        # --------------------------------------------------------
-        # Tancar PDF
-        # --------------------------------------------------------
-
         if document is not None:
-
             try:
                 document.close()
             except Exception:
@@ -455,36 +236,33 @@ def extract_all_text(pdf_path):
 
 
 # ============================================================
-# NETEJA OCR
+# NORMALITZACIÓ
 # ============================================================
 
 def normalize_text(text):
     """
-    Neteja errors típics de l'OCR.
+    Neteja errors comuns de OCR sense destruir les línies.
     """
 
     if not text:
         return ""
 
     replacements = {
-
         " Iva": " IVA",
         " lva": " IVA",
-
         "Iva": "IVA",
         "lva": "IVA",
-
-        "IGIC": "IGIC",
+        "Igic": "IGIC",
+        "IGlC": "IGIC",
+        "Todo": "Total",
     }
 
     for old, new in replacements.items():
+        text = text.replace(old, new)
 
-        text = text.replace(
-            old,
-            new
-        )
-
-    # Eliminar espais i tabuladors duplicats
+    # Només traiem espais/tabs repetits.
+    # IMPORTANT: NO eliminem salts de línia perquè
+    # els necessitem per detectar les files.
     text = re.sub(
         r"[ \t]+",
         " ",
@@ -501,14 +279,8 @@ def normalize_text(text):
 def extract_invoice_number(text):
 
     patterns = [
-
-        r"Factura\s*#?\s*([A-Z0-9]+[-/][A-Z0-9-]+)",
-
-        r"Factura\s*#?\s*([A-Z]{2,5}\d+[-/]\d+)",
-
-        r"Factura\s*#?\s*([FES]\w+)",
-
-        r"\bFES\d+[-]\d+\b",
+        r"Factura\s*#?\s*([A-Z0-9]+-\d+)",
+        r"\b(FES\d+-\d+)\b",
     ]
 
     for pattern in patterns:
@@ -520,34 +292,19 @@ def extract_invoice_number(text):
         )
 
         if match:
-
-            if match.lastindex:
-
-                return match.group(
-                    1
-                ).strip()
-
-            return match.group(
-                0
-            ).strip()
+            return match.group(1).strip()
 
     return None
 
 
 # ============================================================
-# DATA DE FACTURA
+# DATA
 # ============================================================
 
 def extract_invoice_date(text):
 
     patterns = [
-
         r"Fecha\s*:?\s*(\d{2}/\d{2}/\d{4})",
-
-        r"Fecha\s*:?\s*(\d{2}-\d{2}-\d{4})",
-
-        r"Fecha\s*:?\s*(\d{2}\.\d{2}\.\d{4})",
-
         r"\b(\d{2}/\d{2}/\d{4})\b",
     ]
 
@@ -560,29 +317,37 @@ def extract_invoice_date(text):
         )
 
         if match:
-
-            return match.group(
-                1
-            )
+            return match.group(1)
 
     return None
 
 
 # ============================================================
-# TOTAL
+# TOTAL FACTURA
 # ============================================================
 
 def extract_total(text):
+    """
+    A les factures AniCura:
+
+        Total 27,04 € 155,81 €
+
+    27,04 = IVA
+    155,81 = total factura
+
+    Per tant, agafem SEMPRE el segon import.
+    """
 
     patterns = [
 
-        r"Total\s*:?\s*([0-9\.,]+)\s*€",
+        r"\bTotal\s+"
+        r"(\d{1,4}[.,]\d{2})\s*€\s+"
+        r"(\d{1,4}[.,]\d{2})\s*€",
 
-        r"TOTAL\s*:?\s*([0-9\.,]+)",
+        r"\bTotal\s+"
+        r"(\d{1,4}[.,]\d{2})\s+"
+        r"(\d{1,4}[.,]\d{2})",
 
-        r"Total factura\s*:?\s*([0-9\.,]+)",
-
-        r"Importe total\s*:?\s*([0-9\.,]+)",
     ]
 
     for pattern in patterns:
@@ -594,10 +359,7 @@ def extract_total(text):
         )
 
         if match:
-
-            return match.group(
-                1
-            )
+            return match.group(2)
 
     return None
 
@@ -606,70 +368,22 @@ def extract_total(text):
 # PACIENTES
 # ============================================================
 
-def extract_patients(text):
-    """
-    Intenta detectar pacients a partir de les files OCR.
-    """
+def extract_patients_from_rows(rows):
 
     patients = []
 
-    lines = text.splitlines()
+    for row in rows:
 
-    for line in lines:
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        # Buscar una data al principi
-        date_match = re.match(
-            r"^(\d{2}/\d{2}/\d{4})\s+(.+)",
-            line
-        )
-
-        if not date_match:
-            continue
-
-        remainder = date_match.group(
-            2
+        patient = row.get(
+            "paciente",
+            ""
         ).strip()
 
-        parts = remainder.split()
-
-        if len(parts) < 2:
-            continue
-
-        patient = parts[0].strip()
-
-        excluded = {
-
-            "TOTAL",
-            "IVA",
-            "IGIC",
-            "BASE",
-            "IMPORTE",
-            "CANTIDAD",
-            "PRECIO",
-            "ARTICULO",
-            "ARTÍCULO",
-        }
-
-        if patient.upper() in excluded:
-            continue
-
-        # Els noms dels pacients solen estar en majúscules.
         if (
-            patient.upper() == patient
-            and len(patient) >= 2
-            and len(patient) <= 40
+            patient
+            and patient not in patients
         ):
-
-            if patient not in patients:
-
-                patients.append(
-                    patient
-                )
+            patients.append(patient)
 
     return patients
 
@@ -680,28 +394,36 @@ def extract_patients(text):
 
 def extract_table_rows(text):
     """
-    Reconstrueix les files de la factura a partir de l'OCR.
+    Parser específic per al format estàndard de factura AniCura.
+
+    Estructura EXACTA de les files:
+
+        DATA PACIENTE ARTÍCULO PREU € CANTITAT IVA % IVA € IMPORT €
+
+    Exemple:
+
+        08/09/2026 LLUC PERFIL HIPOTIROIDISMO
+        80,99 € 1 21 % 17,01 € 98,00 €
+
+    També suportem que TOTA la fila vingui en una sola línia.
     """
 
     rows = []
 
     lines = text.splitlines()
 
-    # Guardem l'última data vista: hi ha factures on l'última
-    # línia d'un pacient (ex: RADIOGRAFIA) surt sense data
-    # perquè a l'original ja comparteix data amb la fila anterior.
-    last_date = None
-    last_patient = None
+    i = 0
 
-    for line in lines:
+    while i < len(lines):
 
-        line = line.strip()
+        line = lines[i].strip()
 
         if not line:
+            i += 1
             continue
 
         # ----------------------------------------------------
-        # Buscar data al principi
+        # Una fila comença SEMPRE per data.
         # ----------------------------------------------------
 
         date_match = re.match(
@@ -709,157 +431,195 @@ def extract_table_rows(text):
             line
         )
 
-        if date_match:
-
-            fecha = date_match.group(1)
-            content = date_match.group(2).strip()
-
-        elif (
-            last_date
-            and last_patient
-            and line.upper().startswith(last_patient.upper())
-            and re.search(r"\d[.,]\d{2}", line)
-        ):
-
-            # Línia sense data explícita però que continua
-            # amb el mateix pacient (ex: RADIOGRAFIA INICIAL).
-            fecha = last_date
-            content = line
-
-        else:
+        if not date_match:
+            i += 1
             continue
 
+        fecha = date_match.group(1)
+        current = date_match.group(2).strip()
+
         # ----------------------------------------------------
-        # Imports amb decimals (preu, IVA valor, importe)
+        # Intentem que la fila sigui completa.
         #
-        # IMPORTANT: només comptem com "import" els números
-        # AMB DECIMALS (ex: "78,51"). Un número solt com "1"
-        # (la quantitat) NO porta decimals, així que amb això
-        # ja no es confon la quantitat amb el preu.
+        # Si l'escàner ha partit l'article en una segona línia,
+        # anem incorporant línies fins trobar:
+        #
+        # PREU € CANTITAT IVA% IVA€ IMPORTE €
         # ----------------------------------------------------
 
-        decimal_pattern = r"(\d{1,4}[.,]\d{2})\s*€?"
+        combined = current
 
-        decimal_values = re.findall(
-            decimal_pattern,
-            content
-        )
+        max_extra_lines = 4
 
-        if len(decimal_values) < 2:
-            continue
+        for extra in range(max_extra_lines + 1):
 
-        # La factura sempre porta, per aquest ordre:
-        # preu, (iva%), iva_valor, importe
-        # Els 3 últims decimals són sempre
-        # preu / iva_valor / importe.
+            match = re.search(
+                r"""
+                ^(.+?)
+                \s+
+                (\d{1,5}[.,]\d{2})\s*€
+                \s+
+                (\d{1,3})
+                \s+
+                (\d{1,2})\s*%
+                \s+
+                (\d{1,5}[.,]\d{2})\s*€
+                \s+
+                (\d{1,5}[.,]\d{2})\s*€
+                $
+                """,
+                combined,
+                re.VERBOSE
+            )
 
-        precio = decimal_values[-3] + " €" if len(decimal_values) >= 3 else (decimal_values[0] + " €")
-        iva_valor = decimal_values[-2] + " €" if len(decimal_values) >= 2 else ""
-        importe = decimal_values[-1] + " €"
-
-        # ----------------------------------------------------
-        # IVA %
-        # ----------------------------------------------------
-
-        iva_match = re.search(
-            r"(\d{1,2})\s*%",
-            content
-        )
-
-        iva = (
-
-            iva_match.group(1) + " %"
-
-            if iva_match
-
-            else ""
-        )
-
-        # ----------------------------------------------------
-        # Eliminar de "content" tot el que ja hem identificat
-        # (decimals, iva%) per quedar-nos només amb:
-        # PACIENT ARTICLE CANTITAT
-        # ----------------------------------------------------
-
-        remainder = re.sub(
-            decimal_pattern,
-            " ",
-            content
-        )
-
-        remainder = re.sub(
-            r"\d{1,2}\s*%",
-            " ",
-            remainder
-        )
-
-        remainder = re.sub(
-            r"\s+",
-            " ",
-            remainder
-        ).strip()
-
-        words = remainder.split()
-
-        if len(words) < 2:
-            continue
-
-        # Primer element = pacient
-        paciente = words[0]
-
-        # ----------------------------------------------------
-        # Cantitat: sol ser l'últim número solt que queda
-        # (sense decimals) just abans dels imports.
-        # Si no en trobem cap, per defecte és "1".
-        # ----------------------------------------------------
-
-        cantidad = "1"
-
-        rest_words = words[1:]
-
-        for i in range(len(rest_words) - 1, -1, -1):
-
-            if re.fullmatch(r"\d{1,3}", rest_words[i]):
-
-                cantidad = rest_words[i]
-
-                rest_words = (
-                    rest_words[:i]
-                    + rest_words[i + 1:]
-                )
-
+            if match:
                 break
 
-        # La resta = article
+            if extra >= max_extra_lines:
+                match = None
+                break
+
+            next_index = i + extra + 1
+
+            if next_index >= len(lines):
+                break
+
+            next_line = lines[next_index].strip()
+
+            # Si la següent línia comença amb una nova data,
+            # no pertany a aquesta fila.
+            if re.match(
+                r"^\d{2}/\d{2}/\d{4}\b",
+                next_line
+            ):
+                break
+
+            # Evitar incorporar capçaleres/resums.
+            if re.match(
+                r"^(Total|Pagos|Pendiente|Tarjeta|Fecha|Paciente|"
+                r"Artículos|Precio|Pagado)\b",
+                next_line,
+                re.IGNORECASE
+            ):
+                break
+
+            combined += " " + next_line
+
+        # ----------------------------------------------------
+        # Si no trobem les 6 columnes finals, no és una fila.
+        # ----------------------------------------------------
+
+        if not match:
+            i += 1
+            continue
+
+        beginning = match.group(1).strip()
+
+        precio = match.group(2)
+        cantidad = match.group(3)
+        iva = match.group(4)
+        iva_valor = match.group(5)
+        importe = match.group(6)
+
+        # ----------------------------------------------------
+        # DATA ja està separada.
+        #
+        # Ara beginning:
+        #
+        # LLUC BIOQUIMICA LAB INT RAL METROLAB CALCIO
+        #
+        # Primer token = pacient
+        # Resta = article
+        # ----------------------------------------------------
+
+        parts = beginning.split()
+
+        if len(parts) < 2:
+            i += 1
+            continue
+
+        paciente = parts[0].strip()
+
         articulo = " ".join(
-            rest_words
+            parts[1:]
         ).strip()
 
+        if not paciente or not articulo:
+            i += 1
+            continue
+
+        # ----------------------------------------------------
+        # Evitem agafar línies del resum de factura.
+        # ----------------------------------------------------
+
+        if paciente.upper() in {
+            "TOTAL",
+            "TODO",
+            "PAGOS",
+            "PENDIENTE",
+            "TARJETA",
+        }:
+            i += 1
+            continue
+
         row = {
-
             "fecha": fecha,
-
             "paciente": paciente,
-
             "articulo": articulo,
-
-            "precio": precio,
-
+            "precio": f"{precio} €",
             "cantidad": cantidad,
-
-            "iva_igic": iva,
-
-            "iva_valor": iva_valor,
-
-            "importe": importe
+            "iva_igic": f"{iva} %",
+            "iva_valor": f"{iva_valor} €",
+            "importe": f"{importe} €"
         }
 
-        rows.append(
-            row
-        )
+        rows.append(row)
 
-        last_date = fecha
-        last_patient = paciente
+        # ----------------------------------------------------
+        # Saltar les línies que hem incorporat.
+        # ----------------------------------------------------
+
+        consumed = 1
+
+        if match:
+
+            # Comptem quantes línies formen la fila.
+            while (
+                consumed <= max_extra_lines
+                and i + consumed < len(lines)
+            ):
+
+                candidate = lines[
+                    i + consumed
+                ].strip()
+
+                if not candidate:
+                    consumed += 1
+                    continue
+
+                test_combined = " ".join(
+                    lines[i:i + consumed + 1]
+                ).strip()
+
+                date_removed = re.sub(
+                    r"^\d{2}/\d{2}/\d{4}\s+",
+                    "",
+                    test_combined
+                )
+
+                if re.search(
+                    r"\d{1,5}[.,]\d{2}\s*€\s+"
+                    r"\d{1,3}\s+"
+                    r"\d{1,2}\s*%\s+"
+                    r"\d{1,5}[.,]\d{2}\s*€\s+"
+                    r"\d{1,5}[.,]\d{2}\s*€$",
+                    date_removed
+                ):
+                    consumed += 1
+                else:
+                    break
+
+        i += consumed
 
     return rows
 
@@ -876,10 +636,6 @@ def extract_table_data(pdf_path):
     print("========================================")
     print()
 
-    # --------------------------------------------------------
-    # OCR / TEXT
-    # --------------------------------------------------------
-
     full_text = extract_all_text(
         pdf_path
     )
@@ -888,10 +644,6 @@ def extract_table_data(pdf_path):
         full_text
     )
 
-    # --------------------------------------------------------
-    # Mostrar OCR en terminal
-    # --------------------------------------------------------
-
     print()
     print("========== TEXT EXTRET ==========")
     print()
@@ -899,10 +651,6 @@ def extract_table_data(pdf_path):
     print()
     print("========== FI TEXT ===============")
     print()
-
-    # --------------------------------------------------------
-    # Dades factura
-    # --------------------------------------------------------
 
     invoice_number = extract_invoice_number(
         full_text
@@ -916,61 +664,20 @@ def extract_table_data(pdf_path):
         full_text
     )
 
-    # --------------------------------------------------------
-    # Taula
-    # --------------------------------------------------------
-
     table_rows = extract_table_rows(
         full_text
     )
 
-    # --------------------------------------------------------
-    # Pacients
-    # --------------------------------------------------------
-
-    patients = extract_patients(
-        full_text
+    patients = extract_patients_from_rows(
+        table_rows
     )
 
-    # Si hem trobat pacients a la taula,
-    # els afegim si encara no hi són.
-
-    for row in table_rows:
-
-        patient = row.get(
-            "paciente",
-            ""
-        ).strip()
-
-        if (
-            patient
-            and patient not in patients
-        ):
-
-            patients.append(
-                patient
-            )
-
-    # --------------------------------------------------------
-    # Resultat
-    # --------------------------------------------------------
-
     data = {
-
-        "invoice_number":
-            invoice_number,
-
-        "invoice_date":
-            invoice_date,
-
-        "total":
-            total,
-
-        "patients":
-            patients,
-
-        "table_rows":
-            table_rows
+        "invoice_number": invoice_number,
+        "invoice_date": invoice_date,
+        "total": total,
+        "patients": patients,
+        "table_rows": table_rows
     }
 
     return data
@@ -984,9 +691,7 @@ def extract_table_data(pdf_path):
 def request_entity_too_large(error):
 
     return jsonify({
-
         "success": False,
-
         "error":
             "El PDF és massa gran. "
             "La mida màxima és de 20 MB."
@@ -1009,7 +714,7 @@ def upload_file():
 
         print()
         print("========================================")
-        print("             NOU PDF")
+        print("              NOU PDF")
         print("========================================")
         print()
 
@@ -1020,24 +725,18 @@ def upload_file():
         if "file" not in request.files:
 
             return jsonify({
-
                 "success": False,
-
                 "error":
                     "No s'ha proporcionat "
                     "cap fitxer."
             }), 400
 
-        file = request.files[
-            "file"
-        ]
+        file = request.files["file"]
 
         if file.filename == "":
 
             return jsonify({
-
                 "success": False,
-
                 "error":
                     "No s'ha seleccionat "
                     "cap fitxer."
@@ -1047,14 +746,10 @@ def upload_file():
         # Comprovar extensió
         # ----------------------------------------------------
 
-        if not file.filename.lower().endswith(
-            ".pdf"
-        ):
+        if not file.filename.lower().endswith(".pdf"):
 
             return jsonify({
-
                 "success": False,
-
                 "error":
                     "Només s'accepten "
                     "fitxers PDF."
@@ -1083,15 +778,12 @@ def upload_file():
         # Guardar PDF
         # ----------------------------------------------------
 
-        file.save(
-            filepath
-        )
+        file.save(filepath)
 
         file_size = filepath.stat().st_size
 
         print(
-            f"PDF rebut: "
-            f"{original_filename}"
+            f"PDF rebut: {original_filename}"
         )
 
         print(
@@ -1100,31 +792,21 @@ def upload_file():
         )
 
         # ----------------------------------------------------
-        # OCR / PROCESSAMENT
+        # PROCESSAMENT
         # ----------------------------------------------------
 
         extracted_data = extract_table_data(
             filepath
         )
 
-        # ----------------------------------------------------
-        # Resposta
-        # ----------------------------------------------------
-
         print()
         print("PROCESSAMENT FINALITZAT")
         print()
 
         return jsonify({
-
             "success": True,
-
-            "data":
-                extracted_data,
-
-            "filename":
-                original_filename
-
+            "data": extracted_data,
+            "filename": original_filename
         }), 200
 
     except Exception as error:
@@ -1133,29 +815,20 @@ def upload_file():
         print("========================================")
         print("              ERROR")
         print("========================================")
-        print(
-            str(error)
-        )
+        print(str(error))
         print()
 
         return jsonify({
-
             "success": False,
-
             "error":
                 (
                     "S'ha produït un error "
                     "processant el fitxer: "
                     f"{str(error)}"
                 )
-
         }), 500
 
     finally:
-
-        # ----------------------------------------------------
-        # ELIMINAR PDF TEMPORAL
-        # ----------------------------------------------------
 
         if (
             filepath is not None
@@ -1163,7 +836,6 @@ def upload_file():
         ):
 
             try:
-
                 filepath.unlink()
 
                 print(
@@ -1177,10 +849,6 @@ def upload_file():
                     "el PDF temporal: "
                     f"{cleanup_error}"
                 )
-
-        # ----------------------------------------------------
-        # Alliberar RAM
-        # ----------------------------------------------------
 
         gc.collect()
 
@@ -1196,12 +864,8 @@ def upload_file():
 def health():
 
     return jsonify({
-
-        "status":
-            "ok",
-
-        "ocr":
-            "enabled"
+        "status": "ok",
+        "ocr": "enabled"
     }), 200
 
 
@@ -1218,42 +882,32 @@ if __name__ == "__main__":
     print()
 
     print("Web:")
-    print(
-        "http://localhost:5000/"
-    )
+    print("http://localhost:5000/")
 
     print()
-
     print("Health:")
-    print(
-        "http://localhost:5000/health"
-    )
+    print("http://localhost:5000/health")
 
     print()
-
     print("Configuració:")
-    print(
-        "  OCR: 1.5x"
-    )
-    print(
-        "  MAX PDF: 20 MB"
-    )
-    print(
-        f"  MAX PÀGINES: {MAX_PAGES}"
-    )
-    print(
-        "  OCR només quan cal"
-    )
+    print("  OCR: 3x")
+    print("  MAX PDF: 20 MB")
+    print(f"  MAX PÀGINES: {MAX_PAGES}")
+    print("  OCR només quan cal")
+    print("  1 pacient per full")
+    print("  Format AniCura fix")
 
     print()
     print("========================================")
     print()
 
-    import os
-
     app.run(
         debug=True,
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000))
+        port=int(
+            os.environ.get(
+                "PORT",
+                5000
+            )
+        )
     )
-
