@@ -124,6 +124,20 @@ def preprocess_image(image):
 def perform_ocr(image):
     """
     Executa Tesseract OCR.
+
+    IMPORTANT (Render free tier):
+
+    Fer servir dos idiomes combinats ("spa+cat") és gairebé el
+    DOBLE de lent que fer-ne servir només un, perquè Tesseract
+    ha de consultar dos diccionaris a la vegada. A la CPU tan
+    limitada (compartida) del pla gratuït de Render, això feia
+    que el procés superés els 120 segons i gunicorn el matava
+    (WORKER TIMEOUT / SIGKILL).
+
+    Com que aquestes factures són gairebé sempre en castellà,
+    fem servir només "spa" com a primera opció (molt més ràpid
+    i amb la mateixa precisió comprovada), i només si falla
+    (cas rar) provem altres combinacions.
     """
 
     image = preprocess_image(
@@ -135,7 +149,29 @@ def perform_ocr(image):
     config = "--oem 3 --psm 6"
 
     # --------------------------------------------------------
-    # Primer intent: català + espanyol
+    # Primer intent: només espanyol (ràpid)
+    # --------------------------------------------------------
+
+    try:
+
+        text = pytesseract.image_to_string(
+            image,
+            lang="spa",
+            config=config
+        )
+
+        return text
+
+    except Exception as error:
+
+        print(
+            "No s'ha pogut utilitzar spa:",
+            error
+        )
+
+    # --------------------------------------------------------
+    # Segon intent: català + espanyol
+    # (només si el primer ha fallat, no per defecte)
     # --------------------------------------------------------
 
     try:

@@ -44,6 +44,12 @@ EXPOSE 5000
 # al pla gratuït, i sent l'OCR una tasca 100% de CPU (no
 # d'espera), tenir més threads no accelera res en una sola CPU
 # compartida i només afegeix risc de quedar-se sense memòria
-# si arriben 2 peticions a la vegada. Amb --timeout alt perquè
-# l'OCR d'un PDF pot trigar uns segons.
-CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 120 app:app
+# si arriben 2 peticions a la vegada.
+#
+# --timeout 240: a la CPU compartida (molt limitada) del pla
+# gratuït de Render, l'OCR pot trigar bastant més que en un
+# ordinador normal. Amb 120s gunicorn matava el worker abans
+# que acabés (WORKER TIMEOUT / SIGKILL als logs). Amb "spa"
+# en lloc de "spa+cat" l'OCR ja és ~2x més ràpid, però deixem
+# marge extra igualment.
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 240 app:app
