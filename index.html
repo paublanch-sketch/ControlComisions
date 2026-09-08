@@ -108,7 +108,7 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            padding: 12px 30px;
+            padding: 12px 24px;
             border-radius: 6px;
             font-size: 1em;
             cursor: pointer;
@@ -295,6 +295,117 @@
             justify-content: center;
         }
 
+        .section-title {
+            font-size: 1.5em;
+            color: #333;
+            margin-bottom: 20px;
+            margin-top: 30px;
+            font-weight: bold;
+        }
+
+        /* --- Selecció de línies i exportació --- */
+        .export-panel {
+            margin: 22px 0 20px;
+            padding: 18px;
+            border-radius: 14px;
+            border: 1px solid #d9e2ec;
+            background: #f8fafc;
+        }
+
+        .export-panel-title {
+            font-weight: 700;
+            font-size: 1.08rem;
+            margin-bottom: 12px;
+        }
+
+        .export-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .person-label {
+            font-weight: 600;
+        }
+
+        .form-select, .person-select {
+            min-width: 180px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            font-size: 0.95rem;
+            outline: none;
+        }
+
+        .export-controls button {
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #333;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .export-controls button:hover {
+            background: #eef2f7;
+        }
+
+        .selection-info {
+            margin-top: 10px;
+            font-weight: 700;
+        }
+
+        .export-help {
+            margin-top: 6px;
+            color: #64748b;
+            font-size: 0.92rem;
+        }
+
+        #resultsTable tbody tr.selectable-row {
+            cursor: pointer;
+            transition: background-color .15s ease, box-shadow .15s ease;
+        }
+
+        #resultsTable tbody tr.selectable-row:hover {
+            background-color: #f8fafc;
+        }
+
+        #resultsTable tbody tr.selected-row {
+            background-color: #c6f6d5 !important;
+            box-shadow: inset 4px 0 0 #16a34a;
+        }
+
+        #resultsTable tbody tr.selected-row:hover {
+            background-color: #b7efc8 !important;
+        }
+
+        .row-check {
+            display: inline-block;
+            width: 9px;
+            height: 9px;
+            margin-right: 8px;
+            border-radius: 50%;
+            background: #cbd5e1;
+            vertical-align: middle;
+        }
+
+        .selected-row .row-check {
+            background: #16a34a;
+        }
+
+        .google-export-btn {
+            background: #15803d !important;
+            border-color: #15803d !important;
+            color: white !important;
+        }
+
+        .google-export-btn:hover {
+            background: #166534 !important;
+        }
+
         @media (max-width: 768px) {
             .header {
                 padding: 20px;
@@ -320,114 +431,15 @@
                 grid-template-columns: 1fr;
             }
 
-            .export-buttons {
+            .export-buttons, .export-controls {
                 flex-direction: column;
+                align-items: stretch;
             }
 
             button {
                 width: 100%;
             }
         }
-
-        .section-title {
-            font-size: 1.5em;
-            color: #333;
-            margin-bottom: 20px;
-            margin-top: 30px;
-            font-weight: bold;
-        }
-
-        .file-name {
-            color: #667eea;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-    
-        /* --- Selecció de línies i exportació --- */
-        .export-panel {
-            margin: 22px 0 20px;
-            padding: 18px;
-            border-radius: 14px;
-            border: 1px solid #d9e2ec;
-            background: #f8fafc;
-        }
-        .export-panel-title {
-            font-weight: 700;
-            font-size: 1.08rem;
-            margin-bottom: 12px;
-        }
-        .export-controls {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-items: center;
-        }
-        .person-label {
-            font-weight: 600;
-        }
-        .person-select {
-            min-width: 190px;
-            padding: 10px 12px;
-            border-radius: 9px;
-            border: 1px solid #cbd5e1;
-            background: #fff;
-            font-size: 0.98rem;
-        }
-        .export-controls button {
-            padding: 10px 12px;
-            border-radius: 9px;
-            border: 1px solid #cbd5e1;
-            background: #fff;
-            cursor: pointer;
-            font-weight: 600;
-        }
-        .export-controls button:hover {
-            background: #eef2f7;
-        }
-        .selection-info {
-            margin-top: 10px;
-            font-weight: 700;
-        }
-        .export-help {
-            margin-top: 6px;
-            color: #64748b;
-            font-size: 0.92rem;
-        }
-        #resultsTable tbody tr.selectable-row {
-            cursor: pointer;
-            transition: background-color .15s ease, box-shadow .15s ease;
-        }
-        #resultsTable tbody tr.selectable-row:hover {
-            background-color: #f8fafc;
-        }
-        #resultsTable tbody tr.selected-row {
-            background-color: #c6f6d5 !important;
-            box-shadow: inset 4px 0 0 #16a34a;
-        }
-        #resultsTable tbody tr.selected-row:hover {
-            background-color: #b7efc8 !important;
-        }
-        .row-check {
-            display: inline-block;
-            width: 9px;
-            height: 9px;
-            margin-right: 8px;
-            border-radius: 50%;
-            background: #cbd5e1;
-            vertical-align: middle;
-        }
-        .selected-row .row-check {
-            background: #16a34a;
-        }
-        .google-export-btn {
-            background: #15803d !important;
-            border-color: #15803d !important;
-            color: white !important;
-        }
-        .google-export-btn:hover {
-            background: #166534 !important;
-        }
-
     </style>
 </head>
 <body>
@@ -545,11 +557,9 @@
     </div>
 
     <script>
-
         // ==============================
         // CONFIGURACIÓ
         // ==============================
-        // Enganxa aquí la URL de la teva Web App de Google Apps Script.
         const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbycjdR_RTZoWWGVaciJVjWb5Zpld8FSqgg9IDu54t-mi-5ChlpOFc4KM80aANP7ErE/exec';
 
         const dropZone = document.getElementById('dropZone');
@@ -576,9 +586,8 @@
             let month = now.getMonth();
 
             if (preferredDate) {
-                const parts = String(preferredDate).split(/[\\/-]/);
+                const parts = String(preferredDate).split(/[\/-]/);
                 if (parts.length === 3) {
-                    // Accepta dd/mm/yyyy o yyyy-mm-dd.
                     if (parts[0].length === 4) {
                         year = Number(parts[0]);
                         month = Number(parts[1]) - 1;
@@ -594,7 +603,6 @@
             }
 
             select.innerHTML = '';
-            // Mostrem 2 anys enrere i 1 any endavant.
             for (let y = year - 2; y <= year + 1; y++) {
                 for (let m = 0; m < 12; m++) {
                     const option = document.createElement('option');
@@ -651,9 +659,9 @@
             hideAlert();
 
             fetch('/upload', {
-    method: 'POST',
-    body: formData
-})
+                method: 'POST',
+                body: formData
+            })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
@@ -809,7 +817,9 @@
                 return;
             }
 
-            if (!GOOGLE_APPS_SCRIPT_URL || GOOGLE_APPS_SCRIPT_URL === 'ENGANXA_AQUI_LA_URL_DE_LA_TEVA_WEB_APP') {                return;
+            if (!GOOGLE_APPS_SCRIPT_URL) {
+                showAlert('error', '❌ Falta configurar la URL de Google Apps Script');
+                return;
             }
 
             const payload = {
@@ -827,21 +837,26 @@
             const exportButton = document.getElementById('btnExportGoogle');
             exportButton.disabled = true;
             const oldText = exportButton.textContent;
-            exportButton.textContent = '⏳ Enviant...';
+            exportButton.textContent = '⏳ Enviant a Google...';
 
             try {
-                // text/plain manté la petició com a "simple request" i evita problemes de CORS.
-                await fetch(GOOGLE_APPS_SCRIPT_URL, {
+                const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
                     method: 'POST',
-                    mode: 'no-cors',
                     headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
                     body: JSON.stringify(payload)
                 });
 
-                showAlert('success', `✅ S’han enviat ${rows.length} línia${rows.length === 1 ? '' : 's'} a ${person} → ${month}`);
+                const result = await response.json();
+
+                if (result.ok) {
+                    showAlert('success', `✅ S’han enviat ${result.exported_rows} línia(es) correctament a ${result.person} (${result.sheet_name})`);
+                } else {
+                    showAlert('error', `❌ Error de Google Script: ${result.error}`);
+                }
+
             } catch (error) {
-                console.error(error);
-                showAlert('error', `❌ No s’ha pogut enviar a Google Sheets: ${error.message}`);
+                console.error('Error exportació Google Sheets:', error);
+                showAlert('error', `❌ No s’ha pogut enviar a Google Sheets. Comprova la consola F12.`);
             } finally {
                 exportButton.disabled = false;
                 exportButton.textContent = oldText;
@@ -856,14 +871,14 @@
             }
 
             const headers = ['Data', 'Pacient', 'Article', 'Preu', 'Quantitat', 'IVA/IGIC %', 'IVA/IGIC €', 'Import'];
-            let csv = headers.join(',') + '\\n';
+            let csv = headers.join(',') + '\n';
 
             rows.forEach(row => {
                 const values = [
                     row.fecha, row.paciente, row.articulo, row.precio,
                     row.cantidad, row.iva_igic, row.iva_valor, row.importe
                 ];
-                csv += values.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',') + '\\n';
+                csv += values.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',') + '\n';
             });
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -919,7 +934,6 @@
         function printData() {
             window.print();
         }
-
     </script>
 </body>
 </html>
