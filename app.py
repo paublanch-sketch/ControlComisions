@@ -28,7 +28,13 @@ UPLOAD_FOLDER.mkdir(exist_ok=True)
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 # Màxim de pàgines per PDF
-MAX_PAGES = 30
+#
+# Les factures d'AniCura sempre són d'1 pàgina amb aquest format
+# estàndard. Ho limitem a 5 (marge per si algun dia n'hi ha amb
+# més d'un pacient/pàgina) per protegir la RAM del pla gratuït
+# de Render (512 MB): un PDF de 30 pàgines a 3x podria fer petar
+# la memòria si algú el puja per error.
+MAX_PAGES = 5
 
 
 # ============================================================

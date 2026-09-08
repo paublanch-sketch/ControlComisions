@@ -40,8 +40,10 @@ RUN mkdir -p uploads
 ENV PORT=5000
 EXPOSE 5000
 
-# gunicorn amb 1 sol worker: amb 512 MB de RAM al pla gratuït,
-# 2+ workers carregant Tesseract/PyMuPDF a la vegada es queda
-# sense memòria (error 502/out of memory). Amb --timeout alt
-# perquè l'OCR d'un PDF pot trigar uns segons.
-CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 app:app
+# gunicorn amb 1 sol worker I 1 sol thread: amb 512 MB de RAM
+# al pla gratuït, i sent l'OCR una tasca 100% de CPU (no
+# d'espera), tenir més threads no accelera res en una sola CPU
+# compartida i només afegeix risc de quedar-se sense memòria
+# si arriben 2 peticions a la vegada. Amb --timeout alt perquè
+# l'OCR d'un PDF pot trigar uns segons.
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 120 app:app
