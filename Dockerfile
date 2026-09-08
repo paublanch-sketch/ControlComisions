@@ -1,24 +1,47 @@
-FROM python:3.10-slim
+# ============================================================
+# Dockerfile per desplegar a Render (o qualsevol host Docker)
+#
+# Per què cal Docker i no el runtime "Python" normal de Render?
+# Perquè Tesseract OCR és un PROGRAMA del sistema operatiu,
+# no una llibreria de Python. El pla gratuït de Render amb
+# runtime "Python" no permet fer apt-get install, així que
+# sense Docker l'OCR mai funcionarà en producció (encara que
+# en local sí, si tens Tesseract instal·lat a Windows).
+# ============================================================
 
-# Evita demanar opcions interactives durant la instal·lació
-ENV DEBIAN_FRONTEND=noninteractive
+FROM python:3.11-slim
 
-# Instal·la Tesseract OCR, els idiomes (Espanyol i Català) i llibreries del sistema
+# ------------------------------------------------------------
+# Instal·lar Tesseract OCR + idiomes espanyol i català
+# ------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-spa \
     tesseract-ocr-cat \
-    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copia i instal·la les dependències de Python
+# ------------------------------------------------------------
+# Instal·lar dependències de Python
+# ------------------------------------------------------------
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia tot el codi de la teva aplicació
+# ------------------------------------------------------------
+# Copiar el codi de l'aplicació
+# ------------------------------------------------------------
 COPY . .
 
-# Executa l'aplicació amb Gunicorn en el port de Render
-CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--timeout", "120", "app:app"]
+# Carpeta d'uploads (per si de cas)
+RUN mkdir -p uploads
+
+# Render assigna el port dinàmicament amb $PORT
+ENV PORT=5000
+EXPOSE 5000
+
+# gunicorn amb 1 sol worker: amb 512 MB de RAM al pla gratuït,
+# 2+ workers carregant Tesseract/PyMuPDF a la vegada es queda
+# sense memòria (error 502/out of memory). Amb --timeout alt
+# perquè l'OCR d'un PDF pot trigar uns segons.
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 app:app

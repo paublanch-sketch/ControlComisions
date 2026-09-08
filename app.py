@@ -38,11 +38,20 @@ MAX_PAGES = 30
 # Si Tesseract no està al PATH de Windows,
 # descomenta aquesta línia i posa la ruta correcta.
 #
-# Exemple:
+# IMPORTANT: cal haver instal·lat Tesseract-OCR com a PROGRAMA
+# a Windows (no només "pip install pytesseract"). Descarrega'l
+# de: https://github.com/UB-Mannheim/tesseract/wiki
 #
 # pytesseract.pytesseract.tesseract_cmd = (
 #     r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 # )
+
+import os
+
+_TESSERACT_CMD = os.environ.get("TESSERACT_CMD")
+
+if _TESSERACT_CMD:
+    pytesseract.pytesseract.tesseract_cmd = _TESSERACT_CMD
 
 
 # ============================================================
@@ -75,19 +84,32 @@ def index():
 def preprocess_image(image):
     """
     Millora la imatge abans de passar-la per OCR.
+
+    IMPORTANT:
+    Aquestes factures són una IMATGE dins del PDF (no tenen
+    text natiu), per això calen dues coses per llegir-les bé:
+
+    1. Renderitzar a prou resolució (veure MATRIU OCR més avall).
+    2. Binaritzar (blanc/negre pur) en lloc de només augmentar
+       contrast, que és el que feia que l'OCR anterior confongués
+       lletres i números.
     """
 
     # Escala de grisos
     image = image.convert("L")
 
-    # Augmentar contrast
+    # Augmentar contrast abans de binaritzar
     image = ImageEnhance.Contrast(
         image
     ).enhance(2.0)
 
-    # Afilar
-    image = image.filter(
-        ImageFilter.SHARPEN
+    # Binarització (blanc/negre pur).
+    # Llindar 180: per sota és negre, per sobre és blanc.
+    threshold = 180
+
+    image = image.point(
+        lambda x: 0 if x < threshold else 255,
+        "1"
     )
 
     return image
@@ -288,12 +310,17 @@ def extract_all_text(pdf_path):
                 # ------------------------------------------------
                 # RESOLUCIÓ OCR
                 #
-                # 1.5x en lloc de 3x
+                # 3x: amb 1.5x el text sortia il·legible
+                # (dates com "aa082026" en lloc de "05/09/2026").
+                # A 3x, per a una factura d'una pàgina, la imatge
+                # pesa ~13 MB en RAM, cosa assumible fins i tot
+                # amb 512 MB de límit (es allibera de seguida
+                # amb gc.collect()).
                 # ------------------------------------------------
 
                 matrix = fitz.Matrix(
-                    1.5,
-                    1.5
+                    3.0,
+                    3.0
                 )
 
                 # ------------------------------------------------
@@ -618,6 +645,12 @@ def extract_table_rows(text):
 
     lines = text.splitlines()
 
+    # Guardem l'última data vista: hi ha factures on l'última
+    # línia d'un pacient (ex: RADIOGRAFIA) surt sense data
+    # perquè a l'original ja comparteix data amb la fila anterior.
+    last_date = None
+    last_patient = None
+
     for line in lines:
 
         line = line.strip()
@@ -634,55 +667,56 @@ def extract_table_rows(text):
             line
         )
 
-        if not date_match:
-            continue
+        if date_match:
 
-        fecha = date_match.group(
-            1
-        )
+            fecha = date_match.group(1)
+            content = date_match.group(2).strip()
 
-        content = date_match.group(
-            2
-        ).strip()
+        elif (
+            last_date
+            and last_patient
+            and line.upper().startswith(last_patient.upper())
+            and re.search(r"\d[.,]\d{2}", line)
+        ):
 
-        # ----------------------------------------------------
-        # Buscar imports
-        # ----------------------------------------------------
+            # Línia sense data explícita però que continua
+            # amb el mateix pacient (ex: RADIOGRAFIA INICIAL).
+            fecha = last_date
+            content = line
 
-        money_pattern = (
-            r"([0-9]{1,3}(?:[.,][0-9]{2})?)\s*€?"
-        )
-
-        money_values = re.findall(
-            money_pattern,
-            content
-        )
-
-        if len(money_values) < 2:
+        else:
             continue
 
         # ----------------------------------------------------
-        # Quantitat
+        # Imports amb decimals (preu, IVA valor, importe)
+        #
+        # IMPORTANT: només comptem com "import" els números
+        # AMB DECIMALS (ex: "78,51"). Un número solt com "1"
+        # (la quantitat) NO porta decimals, així que amb això
+        # ja no es confon la quantitat amb el preu.
         # ----------------------------------------------------
 
-        quantity_match = re.search(
-            r"\b(\d+(?:[.,]\d+)?)\b",
+        decimal_pattern = r"(\d{1,4}[.,]\d{2})\s*€?"
+
+        decimal_values = re.findall(
+            decimal_pattern,
             content
         )
 
-        cantidad = (
+        if len(decimal_values) < 2:
+            continue
 
-            quantity_match.group(
-                1
-            )
+        # La factura sempre porta, per aquest ordre:
+        # preu, (iva%), iva_valor, importe
+        # Els 3 últims decimals són sempre
+        # preu / iva_valor / importe.
 
-            if quantity_match
-
-            else ""
-        )
+        precio = decimal_values[-3] + " €" if len(decimal_values) >= 3 else (decimal_values[0] + " €")
+        iva_valor = decimal_values[-2] + " €" if len(decimal_values) >= 2 else ""
+        importe = decimal_values[-1] + " €"
 
         # ----------------------------------------------------
-        # IVA
+        # IVA %
         # ----------------------------------------------------
 
         iva_match = re.search(
@@ -700,28 +734,30 @@ def extract_table_rows(text):
         )
 
         # ----------------------------------------------------
-        # Separar text de números
+        # Eliminar de "content" tot el que ja hem identificat
+        # (decimals, iva%) per quedar-nos només amb:
+        # PACIENT ARTICLE CANTITAT
         # ----------------------------------------------------
 
-        text_part = re.sub(
-            r"\d{1,3}(?:[.,]\d{2})?\s*€?",
+        remainder = re.sub(
+            decimal_pattern,
             " ",
             content
         )
 
-        text_part = re.sub(
+        remainder = re.sub(
             r"\d{1,2}\s*%",
             " ",
-            text_part
+            remainder
         )
 
-        text_part = re.sub(
+        remainder = re.sub(
             r"\s+",
             " ",
-            text_part
+            remainder
         ).strip()
 
-        words = text_part.split()
+        words = remainder.split()
 
         if len(words) < 2:
             continue
@@ -729,39 +765,33 @@ def extract_table_rows(text):
         # Primer element = pacient
         paciente = words[0]
 
-        # Resta = article
+        # ----------------------------------------------------
+        # Cantitat: sol ser l'últim número solt que queda
+        # (sense decimals) just abans dels imports.
+        # Si no en trobem cap, per defecte és "1".
+        # ----------------------------------------------------
+
+        cantidad = "1"
+
+        rest_words = words[1:]
+
+        for i in range(len(rest_words) - 1, -1, -1):
+
+            if re.fullmatch(r"\d{1,3}", rest_words[i]):
+
+                cantidad = rest_words[i]
+
+                rest_words = (
+                    rest_words[:i]
+                    + rest_words[i + 1:]
+                )
+
+                break
+
+        # La resta = article
         articulo = " ".join(
-            words[1:]
-        )
-
-        # ----------------------------------------------------
-        # Imports
-        # ----------------------------------------------------
-
-        precio = ""
-        iva_valor = ""
-        importe = ""
-
-        if len(money_values) >= 1:
-
-            precio = (
-                money_values[0]
-                + " €"
-            )
-
-        if len(money_values) >= 2:
-
-            importe = (
-                money_values[-1]
-                + " €"
-            )
-
-        if len(money_values) >= 3:
-
-            iva_valor = (
-                money_values[-2]
-                + " €"
-            )
+            rest_words
+        ).strip()
 
         row = {
 
@@ -785,6 +815,9 @@ def extract_table_rows(text):
         rows.append(
             row
         )
+
+        last_date = fecha
+        last_patient = paciente
 
     return rows
 
@@ -1174,9 +1207,11 @@ if __name__ == "__main__":
     print("========================================")
     print()
 
+    import os
+
     app.run(
         debug=True,
         host="0.0.0.0",
-        port=5000
+        port=int(os.environ.get("PORT", 5000))
     )
 
