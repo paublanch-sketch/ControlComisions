@@ -664,15 +664,15 @@
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
-                    currentData = data.data;
-                    selectedRowIndexes.clear();
-                    displayResults(data.data);
-                    showAlert('success', '✅ Arxiu processat correctament');
-                } else {
-                    showAlert('error', `❌ Error: ${data.error || 'No s’ha pogut processar el PDF'}`);
-                }
-            })
+    if (data.success) {
+        currentData = data;
+        selectedRowIndexes.clear();
+        displayResults(data);
+        showAlert('success', '✅ Arxiu processat correctament');
+    } else {
+        showAlert('error', `❌ Error: ${data.error || 'No s’ha pogut processar el PDF'}`);
+    }
+})
             .catch(error => {
                 showAlert('error', `❌ Error: ${error.message}`);
                 console.error('Error:', error);
