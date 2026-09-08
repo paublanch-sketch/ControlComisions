@@ -328,29 +328,36 @@ def extract_invoice_date(text):
 
 def extract_total(text):
     """
-    Extreu el TOTAL REAL de la factura.
+    Extreu el total REAL de la factura AniCura.
 
-    En les factures AniCura apareix:
+    Exemple del PDF:
         Total 27,04 € 155,81 €
 
-    El primer import és l'IVA.
-    El segon import és el total de la factura.
+    27,04 € = IVA
+    155,81 € = TOTAL de la factura
+
+    La funció retorna NOMÉS el número, sense el símbol €, perquè
+    el frontend ja afegeix € a la pantalla.
     """
 
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    # Primer busquem una línia que contingui "Total".
+    for raw_line in text.splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip()
 
-    for line in lines:
-        if re.search(r"\bTotal\b", line, re.IGNORECASE):
-            amounts = re.findall(
-                r"\d{1,6}[.,]\d{2}\s*€",
-                line
-            )
+        if not re.search(r"\bTotal\b", line, re.IGNORECASE):
+            continue
 
-            if len(amounts) >= 2:
-                # El segon import és el TOTAL de la factura
-                return amounts[-1].replace(" ", "")
+        # Tots els imports monetaris de la mateixa línia.
+        amounts = re.findall(
+            r"(\d{1,6}[.,]\d{2})\s*€",
+            line
+        )
 
-    # Fallback per si el PDF separa els imports en línies diferents
+        # A AniCura el segon import és el total final.
+        if len(amounts) >= 2:
+            return amounts[1]
+
+    # Fallback: per si el PDF separa la línia en diversos blocs.
     match = re.search(
         r"\bTotal\b.*?"
         r"(\d{1,6}[.,]\d{2})\s*€.*?"
@@ -360,9 +367,9 @@ def extract_total(text):
     )
 
     if match:
-        return match.group(2) + "€"
+        return match.group(2)
 
-    return ""
+    return None
 
 
 # ============================================================
