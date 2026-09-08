@@ -328,40 +328,41 @@ def extract_invoice_date(text):
 
 def extract_total(text):
     """
-    A les factures AniCura:
+    Extreu el TOTAL REAL de la factura.
 
+    En les factures AniCura apareix:
         Total 27,04 € 155,81 €
 
-    27,04 = IVA
-    155,81 = total factura
-
-    Per tant, agafem SEMPRE el segon import.
+    El primer import és l'IVA.
+    El segon import és el total de la factura.
     """
 
-    patterns = [
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
 
-        r"\bTotal\s+"
-        r"(\d{1,4}[.,]\d{2})\s*€\s+"
-        r"(\d{1,4}[.,]\d{2})\s*€",
+    for line in lines:
+        if re.search(r"\bTotal\b", line, re.IGNORECASE):
+            amounts = re.findall(
+                r"\d{1,6}[.,]\d{2}\s*€",
+                line
+            )
 
-        r"\bTotal\s+"
-        r"(\d{1,4}[.,]\d{2})\s+"
-        r"(\d{1,4}[.,]\d{2})",
+            if len(amounts) >= 2:
+                # El segon import és el TOTAL de la factura
+                return amounts[-1].replace(" ", "")
 
-    ]
+    # Fallback per si el PDF separa els imports en línies diferents
+    match = re.search(
+        r"\bTotal\b.*?"
+        r"(\d{1,6}[.,]\d{2})\s*€.*?"
+        r"(\d{1,6}[.,]\d{2})\s*€",
+        text,
+        re.IGNORECASE | re.DOTALL
+    )
 
-    for pattern in patterns:
+    if match:
+        return match.group(2) + "€"
 
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
-
-        if match:
-            return match.group(2)
-
-    return None
+    return ""
 
 
 # ============================================================
