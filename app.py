@@ -394,232 +394,215 @@ def extract_patients_from_rows(rows):
 
 def extract_table_rows(text):
     """
-    Parser específic per al format estàndard de factura AniCura.
+    Parser robust per al format de factura AniCura.
 
-    Estructura EXACTA de les files:
+    No assumeix que una línia visual de la factura sigui una línia
+    de text del PDF. Una fila pot venir repartida en diverses línies.
 
-        DATA PACIENTE ARTÍCULO PREU € CANTITAT IVA % IVA € IMPORT €
+    Format detectat:
+        DATA
+        PACIENT
+        ARTICLE (1 o diverses línies)
+        PREU €
+        QUANTITAT
+        IVA %
+        IVA €
+        IMPORTE €
 
-    Exemple:
-
-        08/09/2026 LLUC PERFIL HIPOTIROIDISMO
-        80,99 € 1 21 % 17,01 € 98,00 €
-
-    També suportem que TOTA la fila vingui en una sola línia.
+    També suporta el cas en què tota la fila està en una sola línia.
     """
 
     rows = []
 
-    lines = text.splitlines()
+    # ------------------------------------------------------------
+    # Normalitzar només els salts/espais, però conservar les línies.
+    # ------------------------------------------------------------
+    lines = []
+    for raw in text.splitlines():
+        line = re.sub(r"[ \t]+", " ", raw).strip()
+        if line:
+            lines.append(line)
 
-    i = 0
+    # ------------------------------------------------------------
+    # Regex estrictes per a les columnes numèriques.
+    # ------------------------------------------------------------
+    date_re = re.compile(r"^\d{2}/\d{2}/\d{4}$")
+    money_re = re.compile(r"^\d{1,6}[.,]\d{2}\s*€?$")
+    quantity_re = re.compile(r"^\d{1,3}$")
+    iva_re = re.compile(r"^\d{1,2}\s*%$")
 
+    # ------------------------------------------------------------
+    # Localitzar el començament de la taula.
+    #
+    # És important perquè la factura també té dates en altres
+    # zones, por ejemplo en Pagos.
+    # ------------------------------------------------------------
+    table_start = None
+
+    for idx, line in enumerate(lines):
+        if line.lower() == "fecha":
+            before = " ".join(lines[:idx]).lower()
+            if "pacientes:" in before:
+                table_start = idx + 1
+                break
+
+    if table_start is None:
+        # Fallback: buscar una línea que contenga el encabezado.
+        for idx, line in enumerate(lines):
+            low = line.lower()
+            if "fecha" in low and "paciente" in low and "art" in low:
+                table_start = idx + 1
+                break
+
+    if table_start is None:
+        return rows
+
+    i = table_start
+
+    # ------------------------------------------------------------
+    # Recorrer bloques de filas.
+    # ------------------------------------------------------------
     while i < len(lines):
 
-        line = lines[i].strip()
-
-        if not line:
+        if not date_re.fullmatch(lines[i]):
             i += 1
             continue
 
-        # ----------------------------------------------------
-        # Una fila comença SEMPRE per data.
-        # ----------------------------------------------------
+        fecha = lines[i]
 
-        date_match = re.match(
-            r"^(\d{2}/\d{2}/\d{4})\s+(.+)$",
-            line
-        )
+        # La siguiente línea debe ser el paciente.
+        if i + 1 >= len(lines):
+            break
 
-        if not date_match:
-            i += 1
-            continue
+        paciente = lines[i + 1].strip()
 
-        fecha = date_match.group(1)
-        current = date_match.group(2).strip()
-
-        # ----------------------------------------------------
-        # Intentem que la fila sigui completa.
-        #
-        # Si l'escàner ha partit l'article en una segona línia,
-        # anem incorporant línies fins trobar:
-        #
-        # PREU € CANTITAT IVA% IVA€ IMPORTE €
-        # ----------------------------------------------------
-
-        combined = current
-
-        max_extra_lines = 4
-
-        for extra in range(max_extra_lines + 1):
-
-            match = re.search(
-                r"""
-                ^(.+?)
-                \s+
-                (\d{1,5}[.,]\d{2})\s*€
-                \s+
-                (\d{1,3})
-                \s+
-                (\d{1,2})\s*%
-                \s+
-                (\d{1,5}[.,]\d{2})\s*€
-                \s+
-                (\d{1,5}[.,]\d{2})\s*€
-                $
-                """,
-                combined,
-                re.VERBOSE
-            )
-
-            if match:
-                break
-
-            if extra >= max_extra_lines:
-                match = None
-                break
-
-            next_index = i + extra + 1
-
-            if next_index >= len(lines):
-                break
-
-            next_line = lines[next_index].strip()
-
-            # Si la següent línia comença amb una nova data,
-            # no pertany a aquesta fila.
-            if re.match(
-                r"^\d{2}/\d{2}/\d{4}\b",
-                next_line
-            ):
-                break
-
-            # Evitar incorporar capçaleres/resums.
-            if re.match(
-                r"^(Total|Pagos|Pendiente|Tarjeta|Fecha|Paciente|"
-                r"Artículos|Precio|Pagado)\b",
-                next_line,
-                re.IGNORECASE
-            ):
-                break
-
-            combined += " " + next_line
-
-        # ----------------------------------------------------
-        # Si no trobem les 6 columnes finals, no és una fila.
-        # ----------------------------------------------------
-
-        if not match:
-            i += 1
-            continue
-
-        beginning = match.group(1).strip()
-
-        precio = match.group(2)
-        cantidad = match.group(3)
-        iva = match.group(4)
-        iva_valor = match.group(5)
-        importe = match.group(6)
-
-        # ----------------------------------------------------
-        # DATA ja està separada.
-        #
-        # Ara beginning:
-        #
-        # LLUC BIOQUIMICA LAB INT RAL METROLAB CALCIO
-        #
-        # Primer token = pacient
-        # Resta = article
-        # ----------------------------------------------------
-
-        parts = beginning.split()
-
-        if len(parts) < 2:
-            i += 1
-            continue
-
-        paciente = parts[0].strip()
-
-        articulo = " ".join(
-            parts[1:]
-        ).strip()
-
-        if not paciente or not articulo:
-            i += 1
-            continue
-
-        # ----------------------------------------------------
-        # Evitem agafar línies del resum de factura.
-        # ----------------------------------------------------
-
-        if paciente.upper() in {
-            "TOTAL",
-            "TODO",
-            "PAGOS",
-            "PENDIENTE",
-            "TARJETA",
+        # Si parece una sección de resumen, no es una fila.
+        if paciente.lower() in {
+            "total",
+            "pagos",
+            "pendiente",
+            "pendiente de pago",
+            "tarjeta",
+            "fecha",
+            "paciente",
+            "artículos",
+            "precio",
+            "cantidad",
+            "importe",
         }:
             i += 1
             continue
 
-        row = {
-            "fecha": fecha,
-            "paciente": paciente,
-            "articulo": articulo,
-            "precio": f"{precio} €",
-            "cantidad": cantidad,
-            "iva_igic": f"{iva} %",
-            "iva_valor": f"{iva_valor} €",
-            "importe": f"{importe} €"
-        }
+        # --------------------------------------------------------
+        # Buscar el bloque:
+        #
+        # precio
+        # cantidad
+        # iva
+        # iva €
+        # importe €
+        #
+        # Todo lo anterior al precio es el artículo.
+        # --------------------------------------------------------
+        article_parts = []
+        j = i + 2
+        found = False
 
-        rows.append(row)
+        while j < len(lines):
 
-        # ----------------------------------------------------
-        # Saltar les línies que hem incorporat.
-        # ----------------------------------------------------
+            current = lines[j]
 
-        consumed = 1
+            # Nueva fecha => la fila anterior no estaba completa.
+            if date_re.fullmatch(current):
+                break
 
-        if match:
+            # Fin de tabla.
+            if current.lower() in {
+                "total",
+                "pagos",
+                "pendiente",
+                "pendiente de pago",
+            }:
+                break
 
-            # Comptem quantes línies formen la fila.
-            while (
-                consumed <= max_extra_lines
-                and i + consumed < len(lines)
+            # ----------------------------------------------------
+            # Caso 1: columnas finales cada una en su propia línea.
+            # ----------------------------------------------------
+            if (
+                j + 4 < len(lines)
+                and money_re.fullmatch(lines[j])
+                and quantity_re.fullmatch(lines[j + 1])
+                and iva_re.fullmatch(lines[j + 2])
+                and money_re.fullmatch(lines[j + 3])
+                and money_re.fullmatch(lines[j + 4])
             ):
+                precio = lines[j]
+                cantidad = lines[j + 1]
+                iva = lines[j + 2]
+                iva_valor = lines[j + 3]
+                importe = lines[j + 4]
 
-                candidate = lines[
-                    i + consumed
-                ].strip()
+                articulo = " ".join(article_parts).strip()
 
-                if not candidate:
-                    consumed += 1
-                    continue
+                if articulo:
+                    rows.append({
+                        "fecha": fecha,
+                        "paciente": paciente,
+                        "articulo": articulo,
+                        "precio": precio if "€" in precio else precio + " €",
+                        "cantidad": cantidad,
+                        "iva_igic": iva if "%" in iva else iva + " %",
+                        "iva_valor": iva_valor if "€" in iva_valor else iva_valor + " €",
+                        "importe": importe if "€" in importe else importe + " €",
+                    })
 
-                test_combined = " ".join(
-                    lines[i:i + consumed + 1]
-                ).strip()
+                i = j + 5
+                found = True
+                break
 
-                date_removed = re.sub(
-                    r"^\d{2}/\d{2}/\d{4}\s+",
-                    "",
-                    test_combined
-                )
+            # ----------------------------------------------------
+            # Caso 2: toda la parte numérica está en la misma línea.
+            #
+            # Ejemplo:
+            # PERFIL HIPOTIROIDISMO 80,99 € 1 21 % 17,01 € 98,00 €
+            # ----------------------------------------------------
+            one_line = re.search(
+                r"^(.*?)\s+"
+                r"(\d{1,6}[.,]\d{2})\s*€\s+"
+                r"(\d{1,3})\s+"
+                r"(\d{1,2})\s*%\s+"
+                r"(\d{1,6}[.,]\d{2})\s*€\s+"
+                r"(\d{1,6}[.,]\d{2})\s*€$",
+                current
+            )
 
-                if re.search(
-                    r"\d{1,5}[.,]\d{2}\s*€\s+"
-                    r"\d{1,3}\s+"
-                    r"\d{1,2}\s*%\s+"
-                    r"\d{1,5}[.,]\d{2}\s*€\s+"
-                    r"\d{1,5}[.,]\d{2}\s*€$",
-                    date_removed
-                ):
-                    consumed += 1
-                else:
-                    break
+            if one_line:
+                article_parts.append(one_line.group(1).strip())
+                articulo = " ".join(article_parts).strip()
 
-        i += consumed
+                rows.append({
+                    "fecha": fecha,
+                    "paciente": paciente,
+                    "articulo": articulo,
+                    "precio": one_line.group(2) + " €",
+                    "cantidad": one_line.group(3),
+                    "iva_igic": one_line.group(4) + " %",
+                    "iva_valor": one_line.group(5) + " €",
+                    "importe": one_line.group(6) + " €",
+                })
+
+                i = j + 1
+                found = True
+                break
+
+            # ----------------------------------------------------
+            # Todavía estamos dentro del nombre del artículo.
+            # ----------------------------------------------------
+            article_parts.append(current)
+            j += 1
+
+        if not found:
+            i += 1
 
     return rows
 
