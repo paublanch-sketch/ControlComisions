@@ -1,9 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-
 import fitz  # PyMuPDF
 import pytesseract
-
 from PIL import Image, ImageEnhance
 import re
 from pathlib import Path
@@ -12,35 +10,24 @@ import gc
 import uuid
 import os
 
-
-# ============================================================
-# CONFIGURACIÓ FLASK
-# ============================================================
-
 app = Flask(__name__)
 CORS(app)
 
 UPLOAD_FOLDER = Path("uploads")
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+MAX_FILE_SIZE = 20 * 1024 * 1024
 MAX_PAGES = 5
 
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 
-
-# ============================================================
-# CONFIGURACIÓ TESSERACT
-# ============================================================
-
 _TESSERACT_CMD = os.environ.get("TESSERACT_CMD")
-
 if _TESSERACT_CMD:
     pytesseract.pytesseract.tesseract_cmd = _TESSERACT_CMD
 
 
 # ============================================================
-# PÀGINA PRINCIPAL
+# PÁGINA PRINCIPAL
 # ============================================================
 
 @app.route("/")
@@ -53,18 +40,8 @@ def index():
 # ============================================================
 
 def preprocess_image(image):
-    """
-    Millora la imatge abans de passar-la per OCR.
-
-    Les factures AniCura són escanejades i mantenen sempre
-    el mateix format visual.
-    """
-
     image = image.convert("L")
-
-    image = ImageEnhance.Contrast(
-        image
-    ).enhance(2.0)
+    image = ImageEnhance.Contrast(image).enhance(2.0)
 
     threshold = 180
 
@@ -77,10 +54,6 @@ def preprocess_image(image):
 
 
 def perform_ocr(image):
-    """
-    OCR amb castellà.
-    """
-
     image = preprocess_image(image)
 
     config = "--oem 3 --psm 6"
@@ -91,6 +64,7 @@ def perform_ocr(image):
             lang="spa",
             config=config
         )
+
     except Exception as error:
         print("Error OCR spa:", error)
 
@@ -100,22 +74,17 @@ def perform_ocr(image):
             lang="eng",
             config=config
         )
+
     except Exception as error:
         print("Error OCR eng:", error)
         return ""
 
 
 # ============================================================
-# OCR DEL PDF
+# EXTRAER TEXTO DEL PDF
 # ============================================================
 
 def extract_all_text(pdf_path):
-    """
-    Processa el PDF pàgina per pàgina.
-
-    Com que el format és fix, utilitzem OCR només si
-    la pàgina no conté text natiu suficient.
-    """
 
     document = None
     all_text = []
@@ -126,21 +95,15 @@ def extract_all_text(pdf_path):
 
         page_count = len(document)
 
-        print()
         print(f"PDF obert: {page_count} pàgines")
 
         if page_count > MAX_PAGES:
             raise ValueError(
-                f"El PDF té {page_count} pàgines. "
-                f"El màxim permès és {MAX_PAGES}."
+                f"El PDF tiene demasiadas páginas. "
+                f"Máximo permitido: {MAX_PAGES}"
             )
 
         for page_number in range(page_count):
-
-            print(
-                f"Processant pàgina "
-                f"{page_number + 1}/{page_count}..."
-            )
 
             page = None
             pix = None
@@ -148,24 +111,15 @@ def extract_all_text(pdf_path):
 
             try:
 
-                page = document.load_page(
-                    page_number
-                )
+                page = document.load_page(page_number)
 
                 # ------------------------------------------------
-                # TEXT NATIU
+                # Primero intentamos texto nativo
                 # ------------------------------------------------
 
                 native_text = page.get_text("text")
 
-                if native_text and len(
-                    native_text.strip()
-                ) >= 30:
-
-                    print(
-                        f"Pàgina {page_number + 1}: "
-                        "text natiu detectat"
-                    )
+                if native_text and len(native_text.strip()) >= 30:
 
                     all_text.append(
                         f"\n--- PÀGINA {page_number + 1} ---\n"
@@ -175,13 +129,8 @@ def extract_all_text(pdf_path):
                     continue
 
                 # ------------------------------------------------
-                # OCR
+                # Si no hay texto suficiente -> OCR
                 # ------------------------------------------------
-
-                print(
-                    f"Pàgina {page_number + 1}: "
-                    "executant OCR"
-                )
 
                 matrix = fitz.Matrix(3.0, 3.0)
 
@@ -190,9 +139,7 @@ def extract_all_text(pdf_path):
                     alpha=False
                 )
 
-                image_bytes = pix.tobytes(
-                    "png"
-                )
+                image_bytes = pix.tobytes("png")
 
                 image = Image.open(
                     io.BytesIO(image_bytes)
@@ -200,9 +147,7 @@ def extract_all_text(pdf_path):
 
                 image.load()
 
-                text = perform_ocr(
-                    image
-                )
+                text = perform_ocr(image)
 
                 all_text.append(
                     f"\n--- PÀGINA {page_number + 1} ---\n"
@@ -211,14 +156,15 @@ def extract_all_text(pdf_path):
 
             finally:
 
-                if image is not None:
-                    try:
+                try:
+                    if image is not None:
                         image.close()
-                    except Exception:
-                        pass
+                except Exception:
+                    pass
 
                 pix = None
                 page = None
+                image = None
 
                 gc.collect()
 
@@ -226,23 +172,20 @@ def extract_all_text(pdf_path):
 
     finally:
 
-        if document is not None:
-            try:
+        try:
+            if document is not None:
                 document.close()
-            except Exception:
-                pass
+        except Exception:
+            pass
 
         gc.collect()
 
 
 # ============================================================
-# NORMALITZACIÓ
+# NORMALIZAR TEXTO
 # ============================================================
 
 def normalize_text(text):
-    """
-    Neteja errors comuns de OCR sense destruir les línies.
-    """
 
     if not text:
         return ""
@@ -254,20 +197,16 @@ def normalize_text(text):
         "lva": "IVA",
         "Igic": "IGIC",
         "IGlC": "IGIC",
+
+        # OCR puede leer Total como Todo
         "Todo": "Total",
     }
 
     for old, new in replacements.items():
         text = text.replace(old, new)
 
-    # Només traiem espais/tabs repetits.
-    # IMPORTANT: NO eliminem salts de línia perquè
-    # els necessitem per detectar les files.
-    text = re.sub(
-        r"[ \t]+",
-        " ",
-        text
-    )
+    # Espacios múltiples
+    text = re.sub(r"[ \t]+", " ", text)
 
     return text
 
@@ -292,13 +231,13 @@ def extract_invoice_number(text):
         )
 
         if match:
-            return match.group(1).strip()
+            return match.group(1)
 
     return None
 
 
 # ============================================================
-# DATA
+# FECHA DE FACTURA
 # ============================================================
 
 def extract_invoice_date(text):
@@ -323,51 +262,96 @@ def extract_invoice_date(text):
 
 
 # ============================================================
-# TOTAL FACTURA
+# TOTAL REAL DE LA FACTURA
 # ============================================================
 
 def extract_total(text):
-    """
-    Extreu el total REAL de la factura AniCura.
 
-    Exemple del PDF:
+    """
+    Busca el TOTAL REAL de la factura.
+
+    Ejemplo AniCura:
+
         Total 27,04 € 155,81 €
 
     27,04 € = IVA
-    155,81 € = TOTAL de la factura
+    155,81 € = total final
 
-    La funció retorna NOMÉS el número, sense el símbol €, perquè
-    el frontend ja afegeix € a la pantalla.
+    Devuelve:
+
+        155,81
+
+    sin el símbolo €.
     """
 
-    # Primer busquem una línia que contingui "Total".
-    for raw_line in text.splitlines():
-        line = re.sub(r"\s+", " ", raw_line).strip()
+    if not text:
+        return None
 
-        if not re.search(r"\bTotal\b", line, re.IGNORECASE):
-            continue
+    clean = text.replace("\xa0", " ")
 
-        # Tots els imports monetaris de la mateixa línia.
-        amounts = re.findall(
-            r"(\d{1,6}[.,]\d{2})\s*€",
-            line
+    clean = re.sub(
+        r"[ \t]+",
+        " ",
+        clean
+    )
+
+    # --------------------------------------------------------
+    # Nos quedamos con la parte anterior a "Pagos".
+    # El total resumen aparece justo antes.
+    # --------------------------------------------------------
+
+    parts = re.split(
+        r"\bPagos\b",
+        clean,
+        maxsplit=1,
+        flags=re.IGNORECASE
+    )
+
+    before_payments = parts[0]
+
+    # --------------------------------------------------------
+    # Buscamos TODOS los "Total"
+    # y empezamos por el último.
+    # --------------------------------------------------------
+
+    total_matches = list(
+        re.finditer(
+            r"\bTotal\b",
+            before_payments,
+            re.IGNORECASE
         )
+    )
 
-        # A AniCura el segon import és el total final.
+    money_pattern = re.compile(
+        r"(\d{1,6}[.,]\d{2})\s*(?:€|EUR)?",
+        re.IGNORECASE
+    )
+
+    for match in reversed(total_matches):
+
+        chunk = before_payments[
+            match.end():
+            match.end() + 250
+        ]
+
+        amounts = money_pattern.findall(chunk)
+
         if len(amounts) >= 2:
-            return amounts[1]
+            return amounts[-1]
 
-    # Fallback: per si el PDF separa la línia en diversos blocs.
-    match = re.search(
-        r"\bTotal\b.*?"
-        r"(\d{1,6}[.,]\d{2})\s*€.*?"
-        r"(\d{1,6}[.,]\d{2})\s*€",
-        text,
+    # --------------------------------------------------------
+    # Fallback: línea de pagos
+    # --------------------------------------------------------
+
+    payment_match = re.search(
+        r"(?:Tarjeta|Pagado|Pago).*?"
+        r"(\d{1,6}[.,]\d{2})\s*(?:€|EUR)?",
+        clean,
         re.IGNORECASE | re.DOTALL
     )
 
-    if match:
-        return match.group(2)
+    if payment_match:
+        return payment_match.group(1)
 
     return None
 
@@ -376,470 +360,587 @@ def extract_total(text):
 # PACIENTES
 # ============================================================
 
-def extract_patients_from_rows(rows):
+def extract_patients(text):
 
     patients = []
 
-    for row in rows:
+    # Primero intentamos encontrar:
+    #
+    # Paciente: LLUC
 
-        patient = row.get(
-            "paciente",
-            ""
-        ).strip()
+    patterns = [
+        r"Paciente\s*:?\s*([A-ZÁÉÍÓÚÀÈÌÒÙÇÑ][A-ZÁÉÍÓÚÀÈÌÒÙÇÑ0-9 .'\-]{1,60})",
+        r"Paciente\s+([A-ZÁÉÍÓÚÀÈÌÒÙÇÑ][A-ZÁÉÍÓÚÀÈÌÒÙÇÑ0-9 .'\-]{1,60})",
+    ]
 
-        if (
-            patient
-            and patient not in patients
-        ):
-            patients.append(patient)
+    for pattern in patterns:
+
+        matches = re.findall(
+            pattern,
+            text,
+            re.IGNORECASE
+        )
+
+        for value in matches:
+
+            value = value.strip()
+
+            # Limpiar posibles textos posteriores
+            value = re.split(
+                r"\b(?:Pagador|Beneficiario|Fecha|Factura|Total)\b",
+                value,
+                flags=re.IGNORECASE
+            )[0].strip()
+
+            if value and value not in patients:
+                patients.append(value)
+
+    # --------------------------------------------------------
+    # Fallback:
+    # buscamos pacientes a partir de las filas.
+    # --------------------------------------------------------
+
+    if not patients:
+
+        lines = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip()
+        ]
+
+        date_pattern = re.compile(
+            r"^\d{2}/\d{2}/\d{4}\b"
+        )
+
+        for line in lines:
+
+            if date_pattern.match(line):
+
+                parts = line.split()
+
+                if len(parts) >= 2:
+
+                    possible_patient = parts[1]
+
+                    if (
+                        possible_patient
+                        and re.match(
+                            r"^[A-ZÁÉÍÓÚÀÈÌÒÙÇÑ0-9]+$",
+                            possible_patient,
+                            re.IGNORECASE
+                        )
+                    ):
+
+                        if possible_patient not in patients:
+                            patients.append(
+                                possible_patient
+                            )
 
     return patients
 
 
 # ============================================================
-# TAULA
+# UTILIDADES PARA CONCEPTOS
 # ============================================================
 
-def extract_table_rows(text):
+DATE_RE = re.compile(
+    r"^\s*(\d{2}/\d{2}/\d{4})\b"
+)
+
+MONEY_RE = re.compile(
+    r"(\d{1,6}[.,]\d{2})\s*(?:€|EUR)?",
+    re.IGNORECASE
+)
+
+
+def clean_line(line):
+
+    line = line.replace("\xa0", " ")
+
+    line = re.sub(
+        r"[ \t]+",
+        " ",
+        line
+    )
+
+    return line.strip()
+
+
+def looks_like_section_header(line):
+
+    return bool(
+        re.match(
+            r"^(?:"
+            r"Total|"
+            r"Pagos|"
+            r"Pendiente de pago|"
+            r"Forma de pago|"
+            r"Observaciones|"
+            r"Gracias"
+            r")\b",
+            line,
+            re.IGNORECASE
+        )
+    )
+
+
+# ============================================================
+# EXTRAER CONCEPTOS
+# ============================================================
+
+def extract_items(text, patients=None):
+
     """
-    Parser robust per al format de factura AniCura.
+    IMPORTANTE:
 
-    No assumeix que una línia visual de la factura sigui una línia
-    de text del PDF. Una fila pot venir repartida en diverses línies.
+    Las filas NO se detectan por fecha.
 
-    Format detectat:
-        DATA
-        PACIENT
-        ARTICLE (1 o diverses línies)
-        PREU €
-        QUANTITAT
+    Se detectan por el nombre del paciente.
+
+    Esto permite trabajar con PDFs donde:
+
+        08/09/2026 LLUC CONCEPTO...
+        LLUC OTRO CONCEPTO...
+        LLUC OTRO CONCEPTO...
+
+    En las filas que no tengan fecha se reutiliza
+    la fecha de la fila anterior.
+
+    Solo se devuelve:
+
+        fecha
+        paciente
+        artículo
+        importe
+
+    Se ignora:
+
+        precio sin IVA
+        cantidad
         IVA %
-        IVA €
-        IMPORTE €
-
-    També suporta el cas en què tota la fila està en una sola línia.
+        importe IVA
     """
 
-    rows = []
+    if not text:
+        return []
 
-    # ------------------------------------------------------------
-    # Normalitzar només els salts/espais, però conservar les línies.
-    # ------------------------------------------------------------
-    lines = []
-    for raw in text.splitlines():
-        line = re.sub(r"[ \t]+", " ", raw).strip()
-        if line:
-            lines.append(line)
+    if patients is None:
+        patients = extract_patients(text)
 
-    # ------------------------------------------------------------
-    # Regex estrictes per a les columnes numèriques.
-    # ------------------------------------------------------------
-    date_re = re.compile(r"^\d{2}/\d{2}/\d{4}$")
-    money_re = re.compile(r"^\d{1,6}[.,]\d{2}\s*€?$")
-    quantity_re = re.compile(r"^\d{1,3}$")
-    iva_re = re.compile(r"^\d{1,2}\s*%$")
+    # --------------------------------------------------------
+    # Limpiar pacientes
+    # --------------------------------------------------------
 
-    # ------------------------------------------------------------
-    # Localitzar el començament de la taula.
+    patients = [
+        clean_line(p)
+        for p in patients
+        if p and clean_line(p)
+    ]
+
+    if not patients:
+        return []
+
+    # Ordenar pacientes de más largo a más corto.
+    # Evita problemas si algún paciente tiene nombres compuestos.
+    patients = sorted(
+        patients,
+        key=len,
+        reverse=True
+    )
+
+    lines = [
+        clean_line(line)
+        for line in text.splitlines()
+        if clean_line(line)
+    ]
+
+    # --------------------------------------------------------
+    # Construimos las filas.
     #
-    # És important perquè la factura també té dates en altres
-    # zones, por ejemplo en Pagos.
-    # ------------------------------------------------------------
-    table_start = None
+    # Una fila empieza cuando aparece un paciente.
+    #
+    # Ejemplo:
+    #
+    # 08/09/2026 LLUC CALCIO...
+    #
+    # o:
+    #
+    # LLUC FOSFORO...
+    # --------------------------------------------------------
 
-    for idx, line in enumerate(lines):
-        if line.lower() == "fecha":
-            before = " ".join(lines[:idx]).lower()
-            if "pacientes:" in before:
-                table_start = idx + 1
-                break
+    raw_rows = []
 
-    if table_start is None:
-        # Fallback: buscar una línea que contenga el encabezado.
-        for idx, line in enumerate(lines):
-            low = line.lower()
-            if "fecha" in low and "paciente" in low and "art" in low:
-                table_start = idx + 1
-                break
+    current_row = []
 
-    if table_start is None:
-        return rows
+    for line in lines:
 
-    i = table_start
+        if looks_like_section_header(line):
 
-    # ------------------------------------------------------------
-    # Recorrer bloques de filas.
-    # ------------------------------------------------------------
-    while i < len(lines):
+            if current_row:
+                raw_rows.append(
+                    " ".join(current_row)
+                )
+                current_row = []
 
-        if not date_re.fullmatch(lines[i]):
-            i += 1
-            continue
-
-        fecha = lines[i]
-
-        # La siguiente línea debe ser el paciente.
-        if i + 1 >= len(lines):
+            # Ya estamos entrando en la zona de totales/pagos.
             break
 
-        paciente = lines[i + 1].strip()
+        # ----------------------------------------------------
+        # ¿La línea contiene un paciente?
+        # ----------------------------------------------------
 
-        # Si parece una sección de resumen, no es una fila.
-        if paciente.lower() in {
-            "total",
-            "pagos",
-            "pendiente",
-            "pendiente de pago",
-            "tarjeta",
-            "fecha",
-            "paciente",
-            "artículos",
-            "precio",
-            "cantidad",
-            "importe",
-        }:
-            i += 1
-            continue
+        patient_found = None
 
-        # --------------------------------------------------------
-        # Buscar el bloque:
-        #
-        # precio
-        # cantidad
-        # iva
-        # iva €
-        # importe €
-        #
-        # Todo lo anterior al precio es el artículo.
-        # --------------------------------------------------------
-        article_parts = []
-        j = i + 2
-        found = False
+        for patient in patients:
 
-        while j < len(lines):
-
-            current = lines[j]
-
-            # Nueva fecha => la fila anterior no estaba completa.
-            if date_re.fullmatch(current):
-                break
-
-            # Fin de tabla.
-            if current.lower() in {
-                "total",
-                "pagos",
-                "pendiente",
-                "pendiente de pago",
-            }:
-                break
-
-            # ----------------------------------------------------
-            # Caso 1: columnas finales cada una en su propia línea.
-            # ----------------------------------------------------
-            if (
-                j + 4 < len(lines)
-                and money_re.fullmatch(lines[j])
-                and quantity_re.fullmatch(lines[j + 1])
-                and iva_re.fullmatch(lines[j + 2])
-                and money_re.fullmatch(lines[j + 3])
-                and money_re.fullmatch(lines[j + 4])
-            ):
-                precio = lines[j]
-                cantidad = lines[j + 1]
-                iva = lines[j + 2]
-                iva_valor = lines[j + 3]
-                importe = lines[j + 4]
-
-                articulo = " ".join(article_parts).strip()
-
-                if articulo:
-                    rows.append({
-                        "fecha": fecha,
-                        "paciente": paciente,
-                        "articulo": articulo,
-                        "precio": precio if "€" in precio else precio + " €",
-                        "cantidad": cantidad,
-                        "iva_igic": iva if "%" in iva else iva + " %",
-                        "iva_valor": iva_valor if "€" in iva_valor else iva_valor + " €",
-                        "importe": importe if "€" in importe else importe + " €",
-                    })
-
-                i = j + 5
-                found = True
-                break
-
-            # ----------------------------------------------------
-            # Caso 2: toda la parte numérica está en la misma línea.
-            #
-            # Ejemplo:
-            # PERFIL HIPOTIROIDISMO 80,99 € 1 21 % 17,01 € 98,00 €
-            # ----------------------------------------------------
-            one_line = re.search(
-                r"^(.*?)\s+"
-                r"(\d{1,6}[.,]\d{2})\s*€\s+"
-                r"(\d{1,3})\s+"
-                r"(\d{1,2})\s*%\s+"
-                r"(\d{1,6}[.,]\d{2})\s*€\s+"
-                r"(\d{1,6}[.,]\d{2})\s*€$",
-                current
+            pattern = re.compile(
+                r"(?<!\S)"
+                + re.escape(patient)
+                + r"(?!\S)",
+                re.IGNORECASE
             )
 
-            if one_line:
-                article_parts.append(one_line.group(1).strip())
-                articulo = " ".join(article_parts).strip()
+            if pattern.search(line):
 
-                rows.append({
-                    "fecha": fecha,
-                    "paciente": paciente,
-                    "articulo": articulo,
-                    "precio": one_line.group(2) + " €",
-                    "cantidad": one_line.group(3),
-                    "iva_igic": one_line.group(4) + " %",
-                    "iva_valor": one_line.group(5) + " €",
-                    "importe": one_line.group(6) + " €",
-                })
-
-                i = j + 1
-                found = True
+                patient_found = patient
                 break
 
-            # ----------------------------------------------------
-            # Todavía estamos dentro del nombre del artículo.
-            # ----------------------------------------------------
-            article_parts.append(current)
-            j += 1
-
-        if not found:
-            i += 1
-
-    return rows
-
-
-# ============================================================
-# FUNCIÓ PRINCIPAL
-# ============================================================
-
-def extract_table_data(pdf_path):
-
-    print()
-    print("========================================")
-    print("        INICIANT PROCESSAMENT")
-    print("========================================")
-    print()
-
-    full_text = extract_all_text(
-        pdf_path
-    )
-
-    full_text = normalize_text(
-        full_text
-    )
-
-    print()
-    print("========== TEXT EXTRET ==========")
-    print()
-    print(full_text)
-    print()
-    print("========== FI TEXT ===============")
-    print()
-
-    invoice_number = extract_invoice_number(
-        full_text
-    )
-
-    invoice_date = extract_invoice_date(
-        full_text
-    )
-
-    total = extract_total(
-        full_text
-    )
-
-    table_rows = extract_table_rows(
-        full_text
-    )
-
-    patients = extract_patients_from_rows(
-        table_rows
-    )
-
-    data = {
-        "invoice_number": invoice_number,
-        "invoice_date": invoice_date,
-        "total": total,
-        "patients": patients,
-        "table_rows": table_rows
-    }
-
-    return data
-
-
-# ============================================================
-# ERROR PDF MASSA GRAN
-# ============================================================
-
-@app.errorhandler(413)
-def request_entity_too_large(error):
-
-    return jsonify({
-        "success": False,
-        "error":
-            "El PDF és massa gran. "
-            "La mida màxima és de 20 MB."
-    }), 413
-
-
-# ============================================================
-# UPLOAD PDF
-# ============================================================
-
-@app.route(
-    "/upload",
-    methods=["POST"]
-)
-def upload_file():
-
-    filepath = None
-
-    try:
-
-        print()
-        print("========================================")
-        print("              NOU PDF")
-        print("========================================")
-        print()
-
         # ----------------------------------------------------
-        # Comprovar fitxer
+        # Si encontramos paciente:
+        # nueva fila.
         # ----------------------------------------------------
 
-        if "file" not in request.files:
+        if patient_found:
 
-            return jsonify({
-                "success": False,
-                "error":
-                    "No s'ha proporcionat "
-                    "cap fitxer."
-            }), 400
+            if current_row:
 
-        file = request.files["file"]
+                raw_rows.append(
+                    " ".join(current_row)
+                )
 
-        if file.filename == "":
+            current_row = [line]
 
-            return jsonify({
-                "success": False,
-                "error":
-                    "No s'ha seleccionat "
-                    "cap fitxer."
-            }), 400
+        else:
 
-        # ----------------------------------------------------
-        # Comprovar extensió
-        # ----------------------------------------------------
+            # ------------------------------------------------
+            # Línea de continuación de la fila anterior.
+            #
+            # Esto es importante para artículos que ocupan
+            # varias líneas.
+            # ------------------------------------------------
 
-        if not file.filename.lower().endswith(".pdf"):
+            if current_row:
+                current_row.append(line)
 
-            return jsonify({
-                "success": False,
-                "error":
-                    "Només s'accepten "
-                    "fitxers PDF."
-            }), 400
-
-        # ----------------------------------------------------
-        # Nom segur i únic
-        # ----------------------------------------------------
-
-        original_filename = Path(
-            file.filename
-        ).name
-
-        unique_filename = (
-            uuid.uuid4().hex
-            + "_"
-            + original_filename
+    # Guardar última fila
+    if current_row:
+        raw_rows.append(
+            " ".join(current_row)
         )
 
-        filepath = (
-            UPLOAD_FOLDER
-            / unique_filename
-        )
+    # --------------------------------------------------------
+    # Convertir filas a objetos.
+    # --------------------------------------------------------
+
+    items = []
+
+    previous_date = None
+
+    for row in raw_rows:
+
+        row = clean_line(row)
+
+        if not row:
+            continue
 
         # ----------------------------------------------------
-        # Guardar PDF
+        # Fecha
         # ----------------------------------------------------
 
-        file.save(filepath)
+        date_match = DATE_RE.match(row)
 
-        file_size = filepath.stat().st_size
+        if date_match:
 
-        print(
-            f"PDF rebut: {original_filename}"
-        )
+            current_date = date_match.group(1)
 
-        print(
-            f"Mida: "
-            f"{file_size / (1024 * 1024):.2f} MB"
-        )
+            # Eliminar fecha del principio
+            body = row[
+                date_match.end():
+            ].strip()
+
+            previous_date = current_date
+
+        else:
+
+            # No hay fecha:
+            # usamos SIEMPRE la anterior.
+            current_date = previous_date
+
+            body = row
+
+        if not body:
+            continue
 
         # ----------------------------------------------------
-        # PROCESSAMENT
+        # Identificar paciente
         # ----------------------------------------------------
 
-        extracted_data = extract_table_data(
-            filepath
+        patient_found = None
+        patient_start = None
+        patient_end = None
+
+        for patient in patients:
+
+            pattern = re.compile(
+                re.escape(patient),
+                re.IGNORECASE
+            )
+
+            match = pattern.search(body)
+
+            if match:
+
+                patient_found = patient
+                patient_start = match.start()
+                patient_end = match.end()
+
+                break
+
+        if not patient_found:
+            continue
+
+        # ----------------------------------------------------
+        # Todo lo que viene después del paciente.
+        # ----------------------------------------------------
+
+        after_patient = body[
+            patient_end:
+        ].strip()
+
+        # ----------------------------------------------------
+        # Encontrar importes.
+        #
+        # El ÚLTIMO importe de la fila es el importe final
+        # del concepto.
+        # ----------------------------------------------------
+
+        amounts = list(
+            MONEY_RE.finditer(after_patient)
         )
 
-        print()
-        print("PROCESSAMENT FINALITZAT")
-        print()
+        if not amounts:
+            continue
 
+        final_amount = amounts[-1].group(1)
+
+        # ----------------------------------------------------
+        # El artículo es todo lo que aparece ANTES del primer
+        # importe.
+        #
+        # Por tanto ignoramos automáticamente:
+        #
+        # precio sin IVA
+        # cantidad
+        # IVA %
+        # importe IVA
+        # etc.
+        # ----------------------------------------------------
+
+        first_amount_start = amounts[0].start()
+
+        article = after_patient[
+            :first_amount_start
+        ].strip()
+
+        # ----------------------------------------------------
+        # Limpieza adicional del artículo
+        # ----------------------------------------------------
+
+        article = re.sub(
+            r"\s+",
+            " ",
+            article
+        ).strip()
+
+        # Quitar posibles caracteres sueltos al final
+        article = article.strip(" -:|")
+
+        if not article:
+            continue
+
+        items.append({
+            "date": current_date or "",
+            "patient": patient_found,
+            "article": article,
+            "amount": final_amount
+        })
+
+    return items
+
+
+# ============================================================
+# API DE SUBIDA
+# ============================================================
+
+@app.route("/upload", methods=["POST"])
+def upload():
+
+    uploaded_file = request.files.get("file")
+
+    if not uploaded_file:
         return jsonify({
-            "success": True,
-            "data": extracted_data,
-            "filename": original_filename
-        }), 200
+            "success": False,
+            "error": "No se ha recibido ningún archivo."
+        }), 400
 
-    except Exception as error:
+    if not uploaded_file.filename:
+        return jsonify({
+            "success": False,
+            "error": "El archivo no tiene nombre."
+        }), 400
 
-        print()
-        print("========================================")
-        print("              ERROR")
-        print("========================================")
-        print(str(error))
-        print()
+    filename = uploaded_file.filename
+
+    if not filename.lower().endswith(".pdf"):
 
         return jsonify({
             "success": False,
-            "error":
-                (
-                    "S'ha produït un error "
-                    "processant el fitxer: "
-                    f"{str(error)}"
-                )
+            "error": "Solo se permiten archivos PDF."
+        }), 400
+
+    # --------------------------------------------------------
+    # Nombre temporal seguro
+    # --------------------------------------------------------
+
+    temp_filename = (
+        f"{uuid.uuid4().hex}.pdf"
+    )
+
+    pdf_path = UPLOAD_FOLDER / temp_filename
+
+    try:
+
+        uploaded_file.save(pdf_path)
+
+        # ----------------------------------------------------
+        # Extraer texto
+        # ----------------------------------------------------
+
+        text = extract_all_text(
+            pdf_path
+        )
+
+        if not text.strip():
+
+            return jsonify({
+                "success": False,
+                "error": "No se ha podido extraer texto del PDF."
+            }), 400
+
+        print("\n================ TEXTO EXTRAÍDO ================\n")
+        print(text)
+        print("\n=================================================\n")
+
+        # ----------------------------------------------------
+        # Normalizar
+        # ----------------------------------------------------
+
+        normalized = normalize_text(text)
+
+        # ----------------------------------------------------
+        # Datos de factura
+        # ----------------------------------------------------
+
+        invoice_number = extract_invoice_number(
+            normalized
+        )
+
+        invoice_date = extract_invoice_date(
+            normalized
+        )
+
+        total = extract_total(
+            normalized
+        )
+
+        patients = extract_patients(
+            normalized
+        )
+
+        # ----------------------------------------------------
+        # Conceptos
+        # ----------------------------------------------------
+
+        items = extract_items(
+            normalized,
+            patients
+        )
+
+        print("Número factura:", invoice_number)
+        print("Fecha factura:", invoice_date)
+        print("Total:", total)
+        print("Pacientes:", patients)
+        print("Conceptos:", len(items))
+
+        for item in items:
+            print(item)
+
+        # ----------------------------------------------------
+        # Respuesta
+        # ----------------------------------------------------
+
+        return jsonify({
+            "success": True,
+
+            "invoice_number": invoice_number,
+            "invoice_date": invoice_date,
+            "total": total,
+
+            "patients": patients,
+
+            "items": items,
+
+            # También enviamos el texto por si el frontend
+            # lo utiliza para depuración.
+            "text": normalized
+        })
+
+    except ValueError as error:
+
+        return jsonify({
+            "success": False,
+            "error": str(error)
+        }), 400
+
+    except Exception as error:
+
+        print("ERROR:", error)
+
+        return jsonify({
+            "success": False,
+            "error": (
+                "Error procesando el PDF: "
+                + str(error)
+            )
         }), 500
 
     finally:
 
-        if (
-            filepath is not None
-            and filepath.exists()
-        ):
+        # ----------------------------------------------------
+        # Eliminar PDF temporal
+        # ----------------------------------------------------
 
-            try:
-                filepath.unlink()
+        try:
 
-                print(
-                    "PDF temporal eliminat."
-                )
+            if pdf_path.exists():
+                pdf_path.unlink()
 
-            except Exception as cleanup_error:
+        except Exception as error:
 
-                print(
-                    "No s'ha pogut eliminar "
-                    "el PDF temporal: "
-                    f"{cleanup_error}"
-                )
+            print(
+                "No se pudo eliminar el archivo temporal:",
+                error
+            )
 
         gc.collect()
 
@@ -848,57 +949,31 @@ def upload_file():
 # HEALTH CHECK
 # ============================================================
 
-@app.route(
-    "/health",
-    methods=["GET"]
-)
+@app.route("/health", methods=["GET"])
 def health():
 
     return jsonify({
-        "status": "ok",
-        "ocr": "enabled"
-    }), 200
+        "success": True,
+        "status": "ok"
+    })
 
 
 # ============================================================
-# START
+# ARRANCAR SERVIDOR
 # ============================================================
 
 if __name__ == "__main__":
 
     print()
-    print("========================================")
-    print("     EXTRACTOR DE FACTURES OCR")
-    print("========================================")
-    print()
-
-    print("Web:")
-    print("http://localhost:5000/")
-
-    print()
-    print("Health:")
-    print("http://localhost:5000/health")
-
-    print()
-    print("Configuració:")
-    print("  OCR: 3x")
-    print("  MAX PDF: 20 MB")
-    print(f"  MAX PÀGINES: {MAX_PAGES}")
-    print("  OCR només quan cal")
-    print("  1 pacient per full")
-    print("  Format AniCura fix")
-
-    print()
-    print("========================================")
+    print("======================================")
+    print("📄 Extractor de Factures")
+    print("======================================")
+    print("Servidor iniciado")
+    print("http://127.0.0.1:5000")
     print()
 
     app.run(
-        debug=True,
         host="0.0.0.0",
-        port=int(
-            os.environ.get(
-                "PORT",
-                5000
-            )
-        )
+        port=5000,
+        debug=True
     )
