@@ -489,7 +489,315 @@ def looks_like_section_header(line):
 # ============================================================
 
 def extract_items(text, patients=None):
+    """
+    Extreu les línies de la factura.
 
+    Regles:
+    - Una línia nova comença quan apareix el nom del pacient.
+    - Si la línia porta data, s'utilitza aquesta data.
+    - Si no porta data, es conserva la data anterior.
+    - L'article pot estar dividit en diverses línies.
+    - L'últim import de la línia és l'import final.
+    """
+
+    if not text:
+        return []
+
+    if patients is None:
+        patients = extract_patients(text)
+
+    patients = [
+        str(p).strip()
+        for p in (patients or [])
+        if str(p).strip()
+    ]
+
+    if not patients:
+        return []
+
+    # Pacients més llargs primer
+    patients = sorted(
+        patients,
+        key=len,
+        reverse=True
+    )
+
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
+
+    items = []
+
+    current = None
+    previous_date = ""
+
+    # Dates DD/MM/YYYY
+    date_re = re.compile(
+        r'\b(\d{2}/\d{2}/\d{4})\b'
+    )
+
+    # Imports europeus:
+    # 9,09 €
+    # 11,00 €
+    # 155,81 €
+    money_re = re.compile(
+        r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*€'
+    )
+
+    stop_words = (
+        "Total",
+        "Pagos",
+        "Pendiente de pago",
+        "Forma de pago",
+        "Base imponible",
+        "IVA",
+        "IGIC"
+    )
+
+    def find_patient(line):
+        """
+        Busca el paciente en la línea.
+        Devuelve el nombre encontrado o None.
+        """
+        upper_line = line.upper()
+
+        for patient in patients:
+            if patient.upper() in upper_line:
+                return patient
+
+        return None
+
+    def clean_article(article):
+        """
+        Limpia la parte del artículo.
+        """
+
+        article = re.sub(
+            r'\s+',
+            ' ',
+            article
+        ).strip()
+
+        # Quitar fecha si quedó dentro
+        article = date_re.sub(
+            '',
+            article
+        )
+
+        # Quitar importes
+        article = money_re.sub(
+            '',
+            article
+        )
+
+        # Quitar cantidades aisladas tipo "1"
+        article = re.sub(
+            r'\s+\d+\s*$',
+            '',
+            article
+        )
+
+        # Quitar IVA tipo 21 %
+        article = re.sub(
+            r'\s+\d{1,2}\s*%\s*',
+            ' ',
+            article
+        )
+
+        # Quitar espacios repetidos
+        article = re.sub(
+            r'\s+',
+            ' ',
+            article
+        ).strip()
+
+        return article
+
+    def finish_current():
+        """
+        Finaliza la fila actual.
+        """
+
+        nonlocal current
+
+        if not current:
+            return
+
+        article = clean_article(
+            current.get("article", "")
+        )
+
+        amounts = current.get(
+            "amounts",
+            []
+        )
+
+        # L'últim import és l'import final
+        final_amount = ""
+
+        if amounts:
+            final_amount = amounts[-1]
+
+        if (
+            current.get("patient")
+            and article
+            and final_amount
+        ):
+            items.append({
+                "date": current.get(
+                    "date",
+                    previous_date
+                ) or previous_date,
+
+                "patient": current.get(
+                    "patient",
+                    ""
+                ),
+
+                "article": article,
+
+                "amount": final_amount
+            })
+
+        current = None
+
+    for raw_line in lines:
+
+        line = raw_line.strip()
+
+        # Quan arribem a Total/Pagos, acabem
+        # les línies de factura.
+        if any(
+            line.lower().startswith(
+                word.lower()
+            )
+            for word in stop_words
+        ):
+            finish_current()
+            break
+
+        patient = find_patient(line)
+
+        date_match = date_re.search(line)
+
+        line_date = (
+            date_match.group(1)
+            if date_match
+            else ""
+        )
+
+        if line_date:
+            previous_date = line_date
+
+        # ==================================================
+        # NOVA LÍNIA:
+        # el pacient marca sempre el començament.
+        # ==================================================
+
+        if patient:
+
+            # Acabem la línia anterior
+            finish_current()
+
+            current = {
+                "date": line_date or previous_date,
+                "patient": patient,
+                "article": "",
+                "amounts": []
+            }
+
+            # Treure el pacient de la línia
+            article_part = re.sub(
+                re.escape(patient),
+                '',
+                line,
+                flags=re.IGNORECASE
+            )
+
+            # Treure la data
+            article_part = date_re.sub(
+                '',
+                article_part,
+                count=1
+            )
+
+            # Buscar imports
+            amounts = money_re.findall(
+                article_part
+            )
+
+            if amounts:
+                current["amounts"].extend(
+                    amounts
+                )
+
+                # L'article és tot el que hi ha
+                # abans del primer import
+                first_money = money_re.search(
+                    article_part
+                )
+
+                if first_money:
+                    article_part = (
+                        article_part[
+                            :first_money.start()
+                        ]
+                    )
+
+            current["article"] = (
+                article_part.strip()
+            )
+
+            continue
+
+        # ==================================================
+        # CONTINUACIÓ DE LA LÍNIA ACTUAL
+        # ==================================================
+
+        if current is None:
+            continue
+
+        # Si aquesta línia té una data,
+        # actualitzem la data.
+        if line_date:
+            current["date"] = line_date
+            previous_date = line_date
+
+        # Imports de la línia
+        amounts = money_re.findall(line)
+
+        if amounts:
+            current["amounts"].extend(
+                amounts
+            )
+
+            # Només afegim a l'article
+            # el text anterior al primer import.
+            first_money = money_re.search(line)
+
+            if first_money:
+                continuation = line[
+                    :first_money.start()
+                ].strip()
+
+                if continuation:
+                    current["article"] += (
+                        " " + continuation
+                    )
+
+        else:
+            # És una continuació de l'article
+            # sense import.
+            current["article"] += (
+                " " + line
+            )
+
+    # Última línia
+    finish_current()
+
+    return items
     """
     IMPORTANTE:
 
