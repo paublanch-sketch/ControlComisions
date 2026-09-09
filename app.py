@@ -721,6 +721,78 @@ def find_header(lines):
     return None, None
 
 
+def refine_article_boundary(data_lines, columns):
+    """
+    Ajusta on acaba la columna de la descripció.
+
+    Els títols de la capçalera són molt més curts que el text
+    que hi ha a sota: "Artículos" ocupa quatre dits i la
+    descripció s'allarga fins a tocar el preu. Si ens quedem
+    amb la mesura del títol, les últimes paraules de l'article
+    ("GATO", "HASTA 24", "LAB INT RAL") cauen dins la columna
+    del preu i es perden.
+
+    Per això mirem les files de dades: la columna del preu
+    comença on comença l'import més a l'esquerra de tota la
+    taula.
+    """
+
+    fields = [column["field"] for column in columns]
+
+    if "article" not in fields:
+        return columns
+
+    article = columns[fields.index("article")]
+
+    following = None
+
+    for column in columns:
+        if column["x0"] >= article["x1"]:
+            if following is None or column["x0"] < following["x0"]:
+                following = column
+
+    if following is None:
+        return columns
+
+    leftmost = None
+
+    for line in data_lines:
+
+        text = line_text(line)
+
+        if text.lower().startswith(STOP_WORDS):
+            break
+
+        money_words = [
+            word
+            for word in line
+            if MONEY_RE.fullmatch(word["text"].strip())
+        ]
+
+        # Només ens fiem de les files completes, que porten com
+        # a mínim el preu, l'IVA i l'import.
+        if len(money_words) < 2:
+            continue
+
+        first = min(money_words, key=lambda w: w["x0"])
+
+        if first["x0"] <= article["x0"]:
+            continue
+
+        if leftmost is None or first["x0"] < leftmost:
+            leftmost = first["x0"]
+
+    if leftmost is None or leftmost <= article["x0"]:
+        return columns
+
+    boundary = leftmost - 2
+
+    article["x1"] = boundary
+    following["x0"] = boundary
+
+    return columns
+
+
 def split_line_by_columns(line, columns):
     """
     Reparteix les paraules d'una línia entre les columnes.
@@ -878,6 +950,11 @@ def extract_items_from_words(words, patients=None):
 
     if columns is None:
         return []
+
+    columns = refine_article_boundary(
+        lines[header_index + 1:],
+        columns
+    )
 
     patient_names = [
         p.upper()
