@@ -754,30 +754,26 @@ function populateMonths() {
     const currentMonth = now.getMonth();
 
     /*
-     * Posem els mesos de l'any actual.
+     * El mes sempre és el mes actual.
+     *
+     * Les comissions es passen del mes que s'està treballant,
+     * així que deixar triar un altre mes només porta a enviar
+     * línies a la pestanya equivocada.
      */
-    for (let i = 0; i < 12; i++) {
+    const option =
+        document.createElement('option');
 
-        const monthNumber =
-            String(i + 1).padStart(2, '0');
-
-        const option =
-            document.createElement('option');
-
-        option.value =
-            `${currentYear}-${monthNumber}`;
-
-        option.textContent =
-            `${months[i]} ${currentYear}`;
-
-        monthSelect.appendChild(option);
-    }
-
-    /*
-     * Seleccionem el mes actual.
-     */
-    monthSelect.value =
+    option.value =
         `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+
+    option.textContent =
+        `${months[currentMonth]} ${currentYear}`;
+
+    monthSelect.appendChild(option);
+
+    monthSelect.value = option.value;
+
+    monthSelect.disabled = true;
 }
 
 
