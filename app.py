@@ -612,10 +612,39 @@ def find_header(lines):
         if "importe" not in joined and "import" not in joined:
             continue
 
+        # La capçalera ocupa dues línies: sota "Precio" hi ha
+        # "excl.IVA/IGIC". Aquesta segona línia forma part de la
+        # capçalera i cal tenir-la en compte per saber fins on
+        # arriba la columna.
+        header_words = list(line)
+        skipped = 0
+
+        if index + 1 < len(lines):
+
+            following = lines[index + 1]
+
+            following_text = line_text(following)
+
+            is_continuation = (
+                len(following) <= 3
+                and not MONEY_RE.search(following_text)
+                and not DATE_RE.search(following_text)
+                and "excl" in normalize_header_word(following_text)
+            )
+
+            if is_continuation:
+                header_words += list(following)
+                skipped = 1
+
         # Assignem cada paraula de la capçalera a un camp.
         anchors = {}
+        unmatched = []
 
-        for word, normal in zip(line, normalized):
+        for word in header_words:
+
+            normal = normalize_header_word(word["text"])
+
+            matched = None
 
             for field, prefixes in COLUMN_ANCHORS:
 
@@ -623,21 +652,61 @@ def find_header(lines):
                     continue
 
                 if any(normal.startswith(p) for p in prefixes):
-                    anchors[field] = word["x0"]
+                    matched = field
                     break
+
+            if matched:
+                anchors[matched] = {
+                    "x0": word["x0"],
+                    "x1": word["x1"]
+                }
+            else:
+                unmatched.append(word)
 
         if "patient" not in anchors or "amount" not in anchors:
             continue
 
-        # Ordenem per X i convertim en intervals.
-        ordered = sorted(anchors.items(), key=lambda kv: kv[1])
+        # Les paraules de capçalera que no són cap camp (per
+        # exemple "excl.IVA/IGIC") eixamplen la columna a la
+        # qual pertanyen.
+        for word in unmatched:
 
+            center = (word["x0"] + word["x1"]) / 2
+
+            closest = min(
+                anchors.items(),
+                key=lambda kv: abs(
+                    (kv[1]["x0"] + kv[1]["x1"]) / 2 - center
+                )
+            )[0]
+
+            anchors[closest]["x0"] = min(anchors[closest]["x0"], word["x0"])
+            anchors[closest]["x1"] = max(anchors[closest]["x1"], word["x1"])
+
+        ordered = sorted(
+            anchors.items(),
+            key=lambda kv: kv[1]["x0"]
+        )
+
+        # El límit entre dues columnes és el punt mig entre el
+        # final d'una capçalera i el començament de la següent.
+        #
+        # Fer servir només la x inicial no serveix: els títols
+        # numèrics ("Precio", "Importe") van alineats a la dreta
+        # i les xifres cauen a la seva esquerra.
         columns = []
 
-        for position, (field, x0) in enumerate(ordered):
+        for position, (field, extent) in enumerate(ordered):
+
+            if position == 0:
+                x0 = float("-inf")
+            else:
+                previous = ordered[position - 1][1]
+                x0 = (previous["x1"] + extent["x0"]) / 2
 
             if position + 1 < len(ordered):
-                x1 = ordered[position + 1][1]
+                following_extent = ordered[position + 1][1]
+                x1 = (extent["x1"] + following_extent["x0"]) / 2
             else:
                 x1 = float("inf")
 
@@ -647,10 +716,7 @@ def find_header(lines):
                 "x1": x1
             })
 
-        # La primera columna arriba fins al marge esquerre.
-        columns[0]["x0"] = float("-inf")
-
-        return index, columns
+        return index + skipped, columns
 
     return None, None
 
@@ -686,9 +752,94 @@ def line_center(line):
 def clean_article(text):
 
     text = re.sub(r"\s+", " ", text or "").strip()
+
+    # Xarxa de seguretat: si l'OCR ha desplaçat un import cap a
+    # la columna de la descripció, el traiem. Cap article conté
+    # una xifra amb coma i dos decimals.
+    text = MONEY_RE.sub(" ", text)
+
+    text = re.sub(r"\s*€\s*", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
     text = text.strip(" -:|.,")
 
     return text
+
+
+def money_to_float(text):
+
+    if not text:
+        return None
+
+    try:
+        return float(
+            text.replace(".", "").replace(",", ".")
+        )
+    except ValueError:
+        return None
+
+
+def row_money_values(line):
+    """
+    Tots els imports de la fila, en ordre d'esquerra a dreta.
+    """
+
+    values = []
+
+    for word in sorted(line, key=lambda w: w["x0"]):
+
+        match = MONEY_RE.search(word["text"])
+
+        if not match:
+            continue
+
+        number = money_to_float(match.group(1))
+
+        if number is not None:
+            values.append((match.group(1), number))
+
+    return values
+
+
+def resolve_price_and_amount(monies, column_price, column_amount):
+    """
+    Decideix quin import és el PREU SENSE IVA i quin és l'import
+    final de la línia.
+
+    No ens refiem només de la posició de les columnes: segons com
+    surti l'OCR, el preu pot caure dins la columna del costat i
+    llavors s'exportava el preu AMB IVA, que és el que inflava la
+    comissió del 5%.
+
+    A la factura cada línia compleix sempre:
+
+        preu sense IVA + import d'IVA = import final
+
+    Aquesta igualtat identifica el preu sense error possible.
+    """
+
+    if len(monies) >= 3:
+
+        total_text, total = monies[-1]
+
+        for index in range(len(monies) - 2):
+
+            base_text, base = monies[index]
+
+            for other_text, other in monies[index + 1:-1]:
+
+                if abs(base + other - total) <= 0.02:
+                    return base_text, total_text
+
+    if len(monies) == 2:
+
+        first_text, first = monies[0]
+        second_text, second = monies[1]
+
+        if first < second:
+            return first_text, second_text
+
+    # Sense manera de comprovar-ho: ens quedem amb les columnes.
+    return column_price, column_amount
 
 
 def parse_money(text):
@@ -778,6 +929,7 @@ def extract_items_from_words(words, patients=None):
                 "article": clean_article(cells.get("article", "")),
                 "price": parse_money(cells.get("price", "")),
                 "amount": parse_money(amount_cell),
+                "monies": row_money_values(line),
                 "prefix": [],
                 "suffix": []
             })
@@ -847,8 +999,14 @@ def extract_items_from_words(words, patients=None):
         if not article:
             continue
 
-        amount = row["amount"]
-        price = row["price"] or amount
+        price, amount = resolve_price_and_amount(
+            row["monies"],
+            row["price"],
+            row["amount"]
+        )
+
+        if not price:
+            price = amount
 
         if not amount and not price:
             continue
