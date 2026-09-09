@@ -25,6 +25,12 @@ _TESSERACT_CMD = os.environ.get("TESSERACT_CMD")
 if _TESSERACT_CMD:
     pytesseract.pytesseract.tesseract_cmd = _TESSERACT_CMD
 
+# URL del desplegament de Google Apps Script.
+# Es configura amb la variable d'entorn APPS_SCRIPT_URL a Render,
+# així no cal tocar el codi cada vegada que es torna a desplegar
+# l'Apps Script (que canvia la URL /exec).
+APPS_SCRIPT_URL = os.environ.get("APPS_SCRIPT_URL", "")
+
 
 # ============================================================
 # PÁGINA PRINCIPAL
@@ -33,6 +39,16 @@ if _TESSERACT_CMD:
 @app.route("/")
 def index():
     return send_from_directory(".", "index.html")
+
+
+@app.route("/config", methods=["GET"])
+def config():
+    """
+    El frontend demana aquí la URL de l'Apps Script.
+    """
+    return jsonify({
+        "apps_script_url": APPS_SCRIPT_URL
+    })
 
 
 # ============================================================
@@ -53,41 +69,94 @@ def preprocess_image(image):
     return image
 
 
-def perform_ocr(image):
+def ocr_words(image, scale):
+    """
+    Fa OCR i retorna les paraules amb les seves coordenades,
+    ja reescalades a punts del PDF.
+
+    Cada paraula és:
+
+        {"text": ..., "x0": ..., "x1": ..., "y0": ..., "y1": ...}
+
+    Treballar amb coordenades és el que permet saber a quina
+    COLUMNA pertany cada paraula. Sense això no hi ha manera
+    fiable de saber si un número és el preu sense IVA o
+    l'import final, ni si una fila porta data o no.
+    """
+
     image = preprocess_image(image)
 
     config = "--oem 3 --psm 6"
 
-    try:
-        return pytesseract.image_to_string(
-            image,
-            lang="spa",
-            config=config
-        )
+    data = None
 
-    except Exception as error:
-        print("Error OCR spa:", error)
+    for lang in ("spa", "eng"):
+        try:
+            data = pytesseract.image_to_data(
+                image,
+                lang=lang,
+                config=config,
+                output_type=pytesseract.Output.DICT
+            )
+            break
+        except Exception as error:
+            print(f"Error OCR {lang}:", error)
 
-    try:
-        return pytesseract.image_to_string(
-            image,
-            lang="eng",
-            config=config
-        )
+    if not data:
+        return []
 
-    except Exception as error:
-        print("Error OCR eng:", error)
-        return ""
+    words = []
+
+    count = len(data.get("text", []))
+
+    for i in range(count):
+
+        text = (data["text"][i] or "").strip()
+
+        if not text:
+            continue
+
+        try:
+            confidence = float(data["conf"][i])
+        except (TypeError, ValueError):
+            confidence = -1.0
+
+        if confidence < 0:
+            continue
+
+        x = data["left"][i] / scale
+        y = data["top"][i] / scale
+        w = data["width"][i] / scale
+        h = data["height"][i] / scale
+
+        words.append({
+            "text": text,
+            "x0": x,
+            "x1": x + w,
+            "y0": y,
+            "y1": y + h
+        })
+
+    return words
 
 
 # ============================================================
-# EXTRAER TEXTO DEL PDF
+# EXTRAER PALABRAS DEL PDF (nativas u OCR)
 # ============================================================
 
-def extract_all_text(pdf_path):
+def extract_words(pdf_path):
+    """
+    Retorna (paraules, text_pla).
+
+    Les factures d'AniCura no porten capa de text real: les
+    lletres són traços vectorials. Per això a la pràctica
+    sempre passem per OCR. Igualment provem primer el text
+    natiu, que és instantani, per si algun dia arriba un PDF
+    digital de veritat.
+    """
 
     document = None
-    all_text = []
+    all_words = []
 
     try:
 
@@ -103,6 +172,8 @@ def extract_all_text(pdf_path):
                 f"Máximo permitido: {MAX_PAGES}"
             )
 
+        page_offset = 0.0
+
         for page_number in range(page_count):
 
             page = None
@@ -113,46 +184,54 @@ def extract_all_text(pdf_path):
 
                 page = document.load_page(page_number)
 
-                # ------------------------------------------------
-                # Primero intentamos texto nativo
-                # ------------------------------------------------
+                page_height = page.rect.height
 
-                native_text = page.get_text("text")
+                native = page.get_text("words")
 
-                if native_text and len(native_text.strip()) >= 30:
+                native_text_length = sum(
+                    len(w[4]) for w in native
+                )
 
-                    all_text.append(
-                        f"\n--- PÀGINA {page_number + 1} ---\n"
-                        f"{native_text}"
+                if native_text_length >= 30:
+
+                    page_words = [
+                        {
+                            "text": w[4],
+                            "x0": w[0],
+                            "x1": w[2],
+                            "y0": w[1],
+                            "y1": w[3]
+                        }
+                        for w in native
+                    ]
+
+                else:
+
+                    scale = 3.0
+
+                    pix = page.get_pixmap(
+                        matrix=fitz.Matrix(scale, scale),
+                        alpha=False
                     )
 
-                    continue
+                    image = Image.open(
+                        io.BytesIO(pix.tobytes("png"))
+                    )
 
-                # ------------------------------------------------
-                # Si no hay texto suficiente -> OCR
-                # ------------------------------------------------
+                    image.load()
 
-                matrix = fitz.Matrix(3.0, 3.0)
+                    page_words = ocr_words(image, scale)
 
-                pix = page.get_pixmap(
-                    matrix=matrix,
-                    alpha=False
-                )
+                # Apilem les pàgines verticalment perquè les
+                # coordenades Y siguin úniques a tot el document.
+                for w in page_words:
+                    w["y0"] += page_offset
+                    w["y1"] += page_offset
+                    w["page"] = page_number + 1
 
-                image_bytes = pix.tobytes("png")
+                all_words.extend(page_words)
 
-                image = Image.open(
-                    io.BytesIO(image_bytes)
-                )
-
-                image.load()
-
-                text = perform_ocr(image)
-
-                all_text.append(
-                    f"\n--- PÀGINA {page_number + 1} ---\n"
-                    f"{text}"
-                )
+                page_offset += page_height + 50
 
             finally:
 
@@ -168,7 +247,7 @@ def extract_all_text(pdf_path):
 
                 gc.collect()
 
-        return "\n".join(all_text)
+        return all_words, words_to_text(all_words)
 
     finally:
 
@@ -179,6 +258,85 @@ def extract_all_text(pdf_path):
             pass
 
         gc.collect()
+
+
+def group_lines(words, tolerance_ratio=0.6):
+    """
+    Agrupa paraules en línies visuals segons la coordenada Y.
+    """
+
+    if not words:
+        return []
+
+    heights = sorted(
+        w["y1"] - w["y0"]
+        for w in words
+        if w["y1"] > w["y0"]
+    )
+
+    median_height = (
+        heights[len(heights) // 2]
+        if heights
+        else 10.0
+    )
+
+    tolerance = max(median_height * tolerance_ratio, 2.0)
+
+    ordered = sorted(
+        words,
+        key=lambda w: ((w["y0"] + w["y1"]) / 2, w["x0"])
+    )
+
+    lines = []
+    current = []
+    current_center = None
+
+    for word in ordered:
+
+        center = (word["y0"] + word["y1"]) / 2
+
+        if (
+            current_center is None
+            or abs(center - current_center) <= tolerance
+        ):
+
+            current.append(word)
+
+            centers = [
+                (w["y0"] + w["y1"]) / 2
+                for w in current
+            ]
+
+            current_center = sum(centers) / len(centers)
+
+        else:
+
+            lines.append(sorted(current, key=lambda w: w["x0"]))
+
+            current = [word]
+            current_center = center
+
+    if current:
+        lines.append(sorted(current, key=lambda w: w["x0"]))
+
+    return lines
+
+
+def line_text(line):
+    return " ".join(w["text"] for w in line)
+
+
+def words_to_text(words):
+    """
+    Text pla reconstruït a partir de les paraules.
+    Serveix per a les dades de capçalera (número, data, total)
+    i per depurar.
+    """
+
+    return "\n".join(
+        line_text(line)
+        for line in group_lines(words)
+    )
 
 
 # ============================================================
@@ -218,8 +376,9 @@ def normalize_text(text):
 def extract_invoice_number(text):
 
     patterns = [
-        r"Factura\s*#?\s*([A-Z0-9]+-\d+)",
+        r"Factura\s*[#¿$:]*\s*([A-Z]{2,4}\d+-\d+)",
         r"\b(FES\d+-\d+)\b",
+        r"Factura\s*[#¿$:]*\s*([A-Z0-9]+-\d+)",
     ]
 
     for pattern in patterns:
@@ -243,6 +402,7 @@ def extract_invoice_number(text):
 def extract_invoice_date(text):
 
     patterns = [
+        r"Fecha\s*:\s*(\d{2}/\d{2}/\d{4})",
         r"Fecha\s*:?\s*(\d{2}/\d{2}/\d{4})",
         r"\b(\d{2}/\d{2}/\d{4})\b",
     ]
@@ -265,87 +425,53 @@ def extract_invoice_date(text):
 # TOTAL REAL DE LA FACTURA
 # ============================================================
 
-def extract_total(text):
+MONEY_RE = re.compile(
+    r"(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})\s*(?:€|EUR)?",
+    re.IGNORECASE
+)
 
+DATE_RE = re.compile(r"\b(\d{2}/\d{2}/\d{4})\b")
+
+
+def extract_total(text):
     """
     Busca el TOTAL REAL de la factura.
 
-    Ejemplo AniCura:
+    Exemple AniCura:
 
-        Total 27,04 € 155,81 €
+        Total 119,76 € 690,00 €
 
-    27,04 € = IVA
-    155,81 € = total final
-
-    Devuelve:
-
-        155,81
-
-    sin el símbolo €.
+    119,76 € = IVA
+    690,00 € = total final
     """
 
     if not text:
         return None
 
-    clean = text.replace("\xa0", " ")
+    clean = re.sub(r"[ \t]+", " ", text.replace("\xa0", " "))
 
-    clean = re.sub(
-        r"[ \t]+",
-        " ",
-        clean
-    )
-
-    # --------------------------------------------------------
-    # Nos quedamos con la parte anterior a "Pagos".
-    # El total resumen aparece justo antes.
-    # --------------------------------------------------------
-
-    parts = re.split(
+    before_payments = re.split(
         r"\bPagos\b",
         clean,
         maxsplit=1,
         flags=re.IGNORECASE
-    )
-
-    before_payments = parts[0]
-
-    # --------------------------------------------------------
-    # Buscamos TODOS los "Total"
-    # y empezamos por el último.
-    # --------------------------------------------------------
+    )[0]
 
     total_matches = list(
-        re.finditer(
-            r"\bTotal\b",
-            before_payments,
-            re.IGNORECASE
-        )
-    )
-
-    money_pattern = re.compile(
-        r"(\d{1,6}[.,]\d{2})\s*(?:€|EUR)?",
-        re.IGNORECASE
+        re.finditer(r"\bTotal\b", before_payments, re.IGNORECASE)
     )
 
     for match in reversed(total_matches):
 
-        chunk = before_payments[
-            match.end():
-            match.end() + 250
-        ]
+        chunk = before_payments[match.end():match.end() + 250]
 
-        amounts = money_pattern.findall(chunk)
+        amounts = MONEY_RE.findall(chunk)
 
         if len(amounts) >= 2:
             return amounts[-1]
 
-    # --------------------------------------------------------
-    # Fallback: línea de pagos
-    # --------------------------------------------------------
-
     payment_match = re.search(
-        r"(?:Tarjeta|Pagado|Pago).*?"
-        r"(\d{1,6}[.,]\d{2})\s*(?:€|EUR)?",
+        r"(?:Tarjeta|Pagado|Pago).*?(\d{1,6}[.,]\d{2})\s*(?:€|EUR)?",
         clean,
         re.IGNORECASE | re.DOTALL
     )
@@ -360,727 +486,384 @@ def extract_total(text):
 # PACIENTES
 # ============================================================
 
+# Paraules que MAI són un pacient. Sense aquesta llista l'OCR
+# acabava agafant la capçalera de la taula ("Artículos") com
+# si fos el nom de l'animal, i llavors no es detectava cap
+# línia de factura.
+NOT_A_PATIENT = {
+    "ARTICULOS", "ARTÍCULOS", "ARTICULO", "ARTÍCULO",
+    "PACIENTE", "PACIENTES", "FECHA", "PRECIO", "CANTIDAD",
+    "IMPORTE", "IVA", "IGIC", "TOTAL", "SUBTOTAL", "PAGOS",
+    "PAGADOR", "BENEFICIARIO", "FACTURA", "EXCL", "MACHO",
+    "HEMBRA", "UNKNOWN", "MIGRATION"
+}
+
+
 def extract_patients(text):
+    """
+    Els pacients surten sempre a la capçalera, en aquest format:
+
+        Pacientes: CONAN (1527555), Macho, Unknown - Migration,
+                   3.7 kg, 10/05/2013 (13 años, 3 meses)
+
+    El patró fiable és NOM seguit d'un identificador entre
+    parèntesis. Amb això suportem també diverses mascotes a la
+    mateixa factura, encara que sigui poc habitual.
+    """
 
     patients = []
 
-    # Primero intentamos encontrar:
-    #
-    # Paciente: LLUC
+    def add(value):
+        value = (value or "").strip(" .,;:-")
+        if not value:
+            return
+        if value.upper() in NOT_A_PATIENT:
+            return
+        if len(value) < 2 or len(value) > 40:
+            return
+        if value not in patients:
+            patients.append(value)
 
-    patterns = [
-        r"Paciente\s*:?\s*([A-ZÁÉÍÓÚÀÈÌÒÙÇÑ][A-ZÁÉÍÓÚÀÈÌÒÙÇÑ0-9 .'\-]{1,60})",
-        r"Paciente\s+([A-ZÁÉÍÓÚÀÈÌÒÙÇÑ][A-ZÁÉÍÓÚÀÈÌÒÙÇÑ0-9 .'\-]{1,60})",
-    ]
+    # 1) Línia "Pacientes:" -> NOM (123456)
+    header_match = re.search(
+        r"Pacientes?\s*:(.{0,400})",
+        text,
+        re.IGNORECASE | re.DOTALL
+    )
 
-    for pattern in patterns:
+    if header_match:
 
-        matches = re.findall(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
+        block = header_match.group(1)
 
-        for value in matches:
+        for name in re.findall(
+            r"([A-ZÁÉÍÓÚÀÈÌÒÙÇÑ][A-ZÁÉÍÓÚÀÈÌÒÙÇÑ' \-]{1,38}?)\s*\(\d{4,}\)",
+            block
+        ):
+            add(name)
 
-            value = value.strip()
+        # 2) Sense identificador: agafem el primer nom en
+        #    majúscules just després dels dos punts.
+        if not patients:
 
-            # Limpiar posibles textos posteriores
-            value = re.split(
-                r"\b(?:Pagador|Beneficiario|Fecha|Factura|Total)\b",
-                value,
-                flags=re.IGNORECASE
-            )[0].strip()
+            first = re.match(
+                r"\s*([A-ZÁÉÍÓÚÀÈÌÒÙÇÑ][A-ZÁÉÍÓÚÀÈÌÒÙÇÑ' \-]{1,38})",
+                block
+            )
 
-            if value and value not in patients:
-                patients.append(value)
-
-    # --------------------------------------------------------
-    # Fallback:
-    # buscamos pacientes a partir de las filas.
-    # --------------------------------------------------------
-
-    if not patients:
-
-        lines = [
-            line.strip()
-            for line in text.splitlines()
-            if line.strip()
-        ]
-
-        date_pattern = re.compile(
-            r"^\d{2}/\d{2}/\d{4}\b"
-        )
-
-        for line in lines:
-
-            if date_pattern.match(line):
-
-                parts = line.split()
-
-                if len(parts) >= 2:
-
-                    possible_patient = parts[1]
-
-                    if (
-                        possible_patient
-                        and re.match(
-                            r"^[A-ZÁÉÍÓÚÀÈÌÒÙÇÑ0-9]+$",
-                            possible_patient,
-                            re.IGNORECASE
-                        )
-                    ):
-
-                        if possible_patient not in patients:
-                            patients.append(
-                                possible_patient
-                            )
+            if first:
+                add(first.group(1))
 
     return patients
 
 
 # ============================================================
-# UTILIDADES PARA CONCEPTOS
+# TAULA DE CONCEPTES (per posició de columnes)
 # ============================================================
 
-DATE_RE = re.compile(
-    r"^\s*(\d{2}/\d{2}/\d{4})\b"
+# Ancoratges de la capçalera de la taula.
+# La clau és el camp; el valor, els inicis de paraula que el
+# identifiquen dins la capçalera.
+COLUMN_ANCHORS = [
+    ("date",     ("fecha", "data")),
+    ("patient",  ("paciente", "pacient", "mascota")),
+    ("article",  ("articulo", "artículo", "articulos", "artículos",
+                  "concepto", "descripcion", "descripción")),
+    ("price",    ("precio", "preu")),
+    ("quantity", ("cantidad", "cant", "quantitat", "uds")),
+    ("vat_pct",  ("iva/igic%", "iva%", "iva/igic", "iva")),
+    ("vat",      ("ivanigic", "iva/igic")),
+    ("amount",   ("importe", "import")),
+]
+
+STOP_WORDS = (
+    "total", "pagos", "pendiente", "forma de pago",
+    "base imponible", "subtotal", "anicura spain"
 )
 
-MONEY_RE = re.compile(
-    r"(\d{1,6}[.,]\d{2})\s*(?:€|EUR)?",
-    re.IGNORECASE
-)
 
-
-def clean_line(line):
-
-    line = line.replace("\xa0", " ")
-
-    line = re.sub(
-        r"[ \t]+",
-        " ",
-        line
-    )
-
-    return line.strip()
-
-
-def looks_like_section_header(line):
-
-    return bool(
-        re.match(
-            r"^(?:"
-            r"Total|"
-            r"Pagos|"
-            r"Pendiente de pago|"
-            r"Forma de pago|"
-            r"Observaciones|"
-            r"Gracias"
-            r")\b",
-            line,
-            re.IGNORECASE
-        )
+def normalize_header_word(word):
+    return re.sub(
+        r"[^a-z0-9/%]",
+        "",
+        word.lower()
+            .replace("á", "a").replace("é", "e").replace("í", "i")
+            .replace("ó", "o").replace("ú", "u")
     )
 
 
-# ============================================================
-# EXTRAER CONCEPTOS
-# ============================================================
-
-def extract_items(text, patients=None):
+def find_header(lines):
     """
-    Extreu les línies de la factura.
-
-    Regles:
-    - Una línia nova comença quan apareix el nom del pacient.
-    - Si la línia porta data, s'utilitza aquesta data.
-    - Si no porta data, es conserva la data anterior.
-    - L'article pot estar dividit en diverses línies.
-    - L'últim import de la línia és l'import final.
+    Localitza la línia de capçalera de la taula i retorna els
+    límits X de cada columna.
     """
 
-    if not text:
-        return []
+    for index, line in enumerate(lines):
 
-    if patients is None:
-        patients = extract_patients(text)
+        normalized = [
+            normalize_header_word(w["text"])
+            for w in line
+        ]
 
-    patients = [
-        str(p).strip()
-        for p in (patients or [])
-        if str(p).strip()
-    ]
+        joined = " ".join(normalized)
 
-    if not patients:
-        return []
+        if "paciente" not in joined and "pacient" not in joined:
+            continue
 
-    # Pacients més llargs primer
-    patients = sorted(
-        patients,
-        key=len,
-        reverse=True
-    )
+        if "importe" not in joined and "import" not in joined:
+            continue
 
-    lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip()
-    ]
+        # Assignem cada paraula de la capçalera a un camp.
+        anchors = {}
 
-    items = []
+        for word, normal in zip(line, normalized):
 
-    current = None
-    previous_date = ""
+            for field, prefixes in COLUMN_ANCHORS:
 
-    # Dates DD/MM/YYYY
-    date_re = re.compile(
-        r'\b(\d{2}/\d{2}/\d{4})\b'
-    )
+                if field in anchors:
+                    continue
 
-    # Imports europeus:
-    # 9,09 €
-    # 11,00 €
-    # 155,81 €
-    money_re = re.compile(
-        r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*€'
-    )
+                if any(normal.startswith(p) for p in prefixes):
+                    anchors[field] = word["x0"]
+                    break
 
-    stop_words = (
-        "Total",
-        "Pagos",
-        "Pendiente de pago",
-        "Forma de pago",
-        "Base imponible",
-        "IVA",
-        "IGIC"
-    )
+        if "patient" not in anchors or "amount" not in anchors:
+            continue
 
-    def find_patient(line):
-        """
-        Busca el paciente en la línea.
-        Devuelve el nombre encontrado o None.
-        """
-        upper_line = line.upper()
+        # Ordenem per X i convertim en intervals.
+        ordered = sorted(anchors.items(), key=lambda kv: kv[1])
 
-        for patient in patients:
-            if patient.upper() in upper_line:
-                return patient
+        columns = []
 
-        return None
+        for position, (field, x0) in enumerate(ordered):
 
-    def clean_article(article):
-        """
-        Limpia la parte del artículo.
-        """
+            if position + 1 < len(ordered):
+                x1 = ordered[position + 1][1]
+            else:
+                x1 = float("inf")
 
-        article = re.sub(
-            r'\s+',
-            ' ',
-            article
-        ).strip()
-
-        # Quitar fecha si quedó dentro
-        article = date_re.sub(
-            '',
-            article
-        )
-
-        # Quitar importes
-        article = money_re.sub(
-            '',
-            article
-        )
-
-        # Quitar cantidades aisladas tipo "1"
-        article = re.sub(
-            r'\s+\d+\s*$',
-            '',
-            article
-        )
-
-        # Quitar IVA tipo 21 %
-        article = re.sub(
-            r'\s+\d{1,2}\s*%\s*',
-            ' ',
-            article
-        )
-
-        # Quitar espacios repetidos
-        article = re.sub(
-            r'\s+',
-            ' ',
-            article
-        ).strip()
-
-        return article
-
-    def finish_current():
-        """
-        Finaliza la fila actual.
-        """
-
-        nonlocal current
-
-        if not current:
-            return
-
-        article = clean_article(
-            current.get("article", "")
-        )
-
-        amounts = current.get(
-            "amounts",
-            []
-        )
-
-        # L'últim import és l'import final
-        final_amount = ""
-
-        if amounts:
-            final_amount = amounts[-1]
-
-        if (
-            current.get("patient")
-            and article
-            and final_amount
-        ):
-            items.append({
-                "date": current.get(
-                    "date",
-                    previous_date
-                ) or previous_date,
-
-                "patient": current.get(
-                    "patient",
-                    ""
-                ),
-
-                "article": article,
-
-                "amount": final_amount
+            columns.append({
+                "field": field,
+                "x0": x0,
+                "x1": x1
             })
 
-        current = None
+        # La primera columna arriba fins al marge esquerre.
+        columns[0]["x0"] = float("-inf")
 
-    for raw_line in lines:
+        return index, columns
 
-        line = raw_line.strip()
+    return None, None
 
-        # Quan arribem a Total/Pagos, acabem
-        # les línies de factura.
-        if any(
-            line.lower().startswith(
-                word.lower()
-            )
-            for word in stop_words
-        ):
-            finish_current()
-            break
 
-        patient = find_patient(line)
-
-        date_match = date_re.search(line)
-
-        line_date = (
-            date_match.group(1)
-            if date_match
-            else ""
-        )
-
-        if line_date:
-            previous_date = line_date
-
-        # ==================================================
-        # NOVA LÍNIA:
-        # el pacient marca sempre el començament.
-        # ==================================================
-
-        if patient:
-
-            # Acabem la línia anterior
-            finish_current()
-
-            current = {
-                "date": line_date or previous_date,
-                "patient": patient,
-                "article": "",
-                "amounts": []
-            }
-
-            # Treure el pacient de la línia
-            article_part = re.sub(
-                re.escape(patient),
-                '',
-                line,
-                flags=re.IGNORECASE
-            )
-
-            # Treure la data
-            article_part = date_re.sub(
-                '',
-                article_part,
-                count=1
-            )
-
-            # Buscar imports
-            amounts = money_re.findall(
-                article_part
-            )
-
-            if amounts:
-                current["amounts"].extend(
-                    amounts
-                )
-
-                # L'article és tot el que hi ha
-                # abans del primer import
-                first_money = money_re.search(
-                    article_part
-                )
-
-                if first_money:
-                    article_part = (
-                        article_part[
-                            :first_money.start()
-                        ]
-                    )
-
-            current["article"] = (
-                article_part.strip()
-            )
-
-            continue
-
-        # ==================================================
-        # CONTINUACIÓ DE LA LÍNIA ACTUAL
-        # ==================================================
-
-        if current is None:
-            continue
-
-        # Si aquesta línia té una data,
-        # actualitzem la data.
-        if line_date:
-            current["date"] = line_date
-            previous_date = line_date
-
-        # Imports de la línia
-        amounts = money_re.findall(line)
-
-        if amounts:
-            current["amounts"].extend(
-                amounts
-            )
-
-            # Només afegim a l'article
-            # el text anterior al primer import.
-            first_money = money_re.search(line)
-
-            if first_money:
-                continuation = line[
-                    :first_money.start()
-                ].strip()
-
-                if continuation:
-                    current["article"] += (
-                        " " + continuation
-                    )
-
-        else:
-            # És una continuació de l'article
-            # sense import.
-            current["article"] += (
-                " " + line
-            )
-
-    # Última línia
-    finish_current()
-
-    return items
+def split_line_by_columns(line, columns):
     """
-    IMPORTANTE:
+    Reparteix les paraules d'una línia entre les columnes.
+    """
 
-    Las filas NO se detectan por fecha.
+    cells = {column["field"]: [] for column in columns}
 
-    Se detectan por el nombre del paciente.
+    for word in line:
 
-    Esto permite trabajar con PDFs donde:
+        center = (word["x0"] + word["x1"]) / 2
 
-        08/09/2026 LLUC CONCEPTO...
-        LLUC OTRO CONCEPTO...
-        LLUC OTRO CONCEPTO...
+        for column in columns:
 
-    En las filas que no tengan fecha se reutiliza
-    la fecha de la fila anterior.
+            if column["x0"] <= center < column["x1"]:
+                cells[column["field"]].append(word["text"])
+                break
 
-    Solo se devuelve:
+    return {
+        field: " ".join(parts).strip()
+        for field, parts in cells.items()
+    }
 
-        fecha
-        paciente
-        artículo
-        importe
 
-    Se ignora:
+def line_center(line):
+    centers = [(w["y0"] + w["y1"]) / 2 for w in line]
+    return sum(centers) / len(centers)
 
-        precio sin IVA
-        cantidad
-        IVA %
-        importe IVA
+
+def clean_article(text):
+
+    text = re.sub(r"\s+", " ", text or "").strip()
+    text = text.strip(" -:|.,")
+
+    return text
+
+
+def parse_money(text):
+    """
+    Retorna l'import europeu trobat al text, en format 1234,56.
     """
 
     if not text:
+        return ""
+
+    match = MONEY_RE.search(text.replace("\xa0", " "))
+
+    return match.group(1) if match else ""
+
+
+def extract_items_from_words(words, patients=None):
+    """
+    Llegeix la taula de conceptes fent servir les COLUMNES.
+
+    Regles:
+
+    - Cada fila real de la factura porta un pacient i un import.
+    - La data pot faltar: llavors s'hereta de la fila anterior.
+    - Un article pot ocupar dues línies. Aquesta segona línia
+      no porta ni pacient ni imports, i pot quedar per SOBRE o
+      per SOTA de la fila. S'assigna a la fila més propera
+      verticalment, que és sempre la seva.
+    """
+
+    lines = group_lines(words)
+
+    if not lines:
         return []
 
-    if patients is None:
-        patients = extract_patients(text)
+    header_index, columns = find_header(lines)
 
-    # --------------------------------------------------------
-    # Limpiar pacientes
-    # --------------------------------------------------------
-
-    patients = [
-        clean_line(p)
-        for p in patients
-        if p and clean_line(p)
-    ]
-
-    if not patients:
+    if columns is None:
         return []
 
-    # Ordenar pacientes de más largo a más corto.
-    # Evita problemas si algún paciente tiene nombres compuestos.
-    patients = sorted(
-        patients,
-        key=len,
-        reverse=True
-    )
-
-    lines = [
-        clean_line(line)
-        for line in text.splitlines()
-        if clean_line(line)
+    patient_names = [
+        p.upper()
+        for p in (patients or [])
+        if p
     ]
 
-    # --------------------------------------------------------
-    # Construimos las filas.
-    #
-    # Una fila empieza cuando aparece un paciente.
-    #
-    # Ejemplo:
-    #
-    # 08/09/2026 LLUC CALCIO...
-    #
-    # o:
-    #
-    # LLUC FOSFORO...
-    # --------------------------------------------------------
+    rows = []
+    fragments = []
 
-    raw_rows = []
+    for line in lines[header_index + 1:]:
 
-    current_row = []
+        text = line_text(line)
 
-    for line in lines:
+        lowered = text.lower().strip()
 
-        if looks_like_section_header(line):
-
-            if current_row:
-                raw_rows.append(
-                    " ".join(current_row)
-                )
-                current_row = []
-
-            # Ya estamos entrando en la zona de totales/pagos.
+        if any(lowered.startswith(word) for word in STOP_WORDS):
             break
 
-        # ----------------------------------------------------
-        # ¿La línea contiene un paciente?
-        # ----------------------------------------------------
+        # La segona línia de la capçalera ("excl.IVA/IGIC")
+        if "excl" in lowered.replace(".", "") and len(line) <= 2:
+            continue
 
-        patient_found = None
+        cells = split_line_by_columns(line, columns)
 
-        for patient in patients:
+        patient_cell = cells.get("patient", "").strip()
+        amount_cell = cells.get("amount", "").strip()
 
-            pattern = re.compile(
-                r"(?<!\S)"
-                + re.escape(patient)
-                + r"(?!\S)",
-                re.IGNORECASE
+        has_patient = bool(patient_cell) and (
+            not patient_names
+            or any(
+                name in patient_cell.upper()
+                for name in patient_names
             )
-
-            if pattern.search(line):
-
-                patient_found = patient
-                break
-
-        # ----------------------------------------------------
-        # Si encontramos paciente:
-        # nueva fila.
-        # ----------------------------------------------------
-
-        if patient_found:
-
-            if current_row:
-
-                raw_rows.append(
-                    " ".join(current_row)
-                )
-
-            current_row = [line]
-
-        else:
-
-            # ------------------------------------------------
-            # Línea de continuación de la fila anterior.
-            #
-            # Esto es importante para artículos que ocupan
-            # varias líneas.
-            # ------------------------------------------------
-
-            if current_row:
-                current_row.append(line)
-
-    # Guardar última fila
-    if current_row:
-        raw_rows.append(
-            " ".join(current_row)
         )
 
-    # --------------------------------------------------------
-    # Convertir filas a objetos.
-    # --------------------------------------------------------
+        has_amount = bool(parse_money(amount_cell))
+
+        if has_patient or has_amount:
+
+            rows.append({
+                "center": line_center(line),
+                "date": (
+                    DATE_RE.search(cells.get("date", "")).group(1)
+                    if DATE_RE.search(cells.get("date", ""))
+                    else ""
+                ),
+                "patient": patient_cell,
+                "article": clean_article(cells.get("article", "")),
+                "price": parse_money(cells.get("price", "")),
+                "amount": parse_money(amount_cell),
+                "prefix": [],
+                "suffix": []
+            })
+
+        elif cells.get("article", "").strip():
+
+            fragments.append({
+                "center": line_center(line),
+                "text": clean_article(cells["article"])
+            })
+
+    if not rows:
+        return []
+
+    # ------------------------------------------------------------
+    # Assignem cada tros d'article a la fila més propera.
+    # ------------------------------------------------------------
+
+    for fragment in fragments:
+
+        best = None
+        best_distance = None
+
+        for position, row in enumerate(rows):
+
+            distance = abs(row["center"] - fragment["center"])
+
+            if best_distance is None or distance < best_distance:
+                best = position
+                best_distance = distance
+
+        if best is None:
+            continue
+
+        if fragment["center"] < rows[best]["center"]:
+            rows[best]["prefix"].append(fragment["text"])
+        else:
+            rows[best]["suffix"].append(fragment["text"])
+
+    # ------------------------------------------------------------
+    # Muntem el resultat final.
+    # ------------------------------------------------------------
 
     items = []
 
-    previous_date = None
+    previous_date = ""
+    previous_patient = ""
 
-    for row in raw_rows:
+    for row in rows:
 
-        row = clean_line(row)
+        date = row["date"] or previous_date
 
-        if not row:
-            continue
+        if row["date"]:
+            previous_date = row["date"]
 
-        # ----------------------------------------------------
-        # Fecha
-        # ----------------------------------------------------
+        patient = row["patient"] or previous_patient
 
-        date_match = DATE_RE.match(row)
+        if row["patient"]:
+            previous_patient = row["patient"]
 
-        if date_match:
-
-            current_date = date_match.group(1)
-
-            # Eliminar fecha del principio
-            body = row[
-                date_match.end():
-            ].strip()
-
-            previous_date = current_date
-
-        else:
-
-            # No hay fecha:
-            # usamos SIEMPRE la anterior.
-            current_date = previous_date
-
-            body = row
-
-        if not body:
-            continue
-
-        # ----------------------------------------------------
-        # Identificar paciente
-        # ----------------------------------------------------
-
-        patient_found = None
-        patient_start = None
-        patient_end = None
-
-        for patient in patients:
-
-            pattern = re.compile(
-                re.escape(patient),
-                re.IGNORECASE
+        article = clean_article(
+            " ".join(
+                row["prefix"] + [row["article"]] + row["suffix"]
             )
-
-            match = pattern.search(body)
-
-            if match:
-
-                patient_found = patient
-                patient_start = match.start()
-                patient_end = match.end()
-
-                break
-
-        if not patient_found:
-            continue
-
-        # ----------------------------------------------------
-        # Todo lo que viene después del paciente.
-        # ----------------------------------------------------
-
-        after_patient = body[
-            patient_end:
-        ].strip()
-
-        # ----------------------------------------------------
-        # Encontrar importes.
-        #
-        # El ÚLTIMO importe de la fila es el importe final
-        # del concepto.
-        # ----------------------------------------------------
-
-        amounts = list(
-            MONEY_RE.finditer(after_patient)
         )
-
-        if not amounts:
-            continue
-
-        final_amount = amounts[-1].group(1)
-
-        # ----------------------------------------------------
-        # El artículo es todo lo que aparece ANTES del primer
-        # importe.
-        #
-        # Por tanto ignoramos automáticamente:
-        #
-        # precio sin IVA
-        # cantidad
-        # IVA %
-        # importe IVA
-        # etc.
-        # ----------------------------------------------------
-
-        first_amount_start = amounts[0].start()
-
-        article = after_patient[
-            :first_amount_start
-        ].strip()
-
-        # ----------------------------------------------------
-        # Limpieza adicional del artículo
-        # ----------------------------------------------------
-
-        article = re.sub(
-            r"\s+",
-            " ",
-            article
-        ).strip()
-
-        # Quitar posibles caracteres sueltos al final
-        article = article.strip(" -:|")
 
         if not article:
             continue
 
+        amount = row["amount"]
+        price = row["price"] or amount
+
+        if not amount and not price:
+            continue
+
         items.append({
-            "date": current_date or "",
-            "patient": patient_found,
+            "date": date,
+            "patient": patient,
             "article": article,
-            "amount": final_amount
+
+            # Preu sense IVA: és la base de la comissió del 5%
+            # i el que va a la columna "PREU S/IVA" del full.
+            "price": price,
+
+            # Import final de la línia, amb IVA.
+            "amount": amount
         })
 
     return items
@@ -1116,13 +899,7 @@ def upload():
             "error": "Solo se permiten archivos PDF."
         }), 400
 
-    # --------------------------------------------------------
-    # Nombre temporal seguro
-    # --------------------------------------------------------
-
-    temp_filename = (
-        f"{uuid.uuid4().hex}.pdf"
-    )
+    temp_filename = f"{uuid.uuid4().hex}.pdf"
 
     pdf_path = UPLOAD_FOLDER / temp_filename
 
@@ -1130,13 +907,7 @@ def upload():
 
         uploaded_file.save(pdf_path)
 
-        # ----------------------------------------------------
-        # Extraer texto
-        # ----------------------------------------------------
-
-        text = extract_all_text(
-            pdf_path
-        )
+        words, text = extract_words(pdf_path)
 
         if not text.strip():
 
@@ -1145,44 +916,25 @@ def upload():
                 "error": "No se ha podido extraer texto del PDF."
             }), 400
 
-        print("\n================ TEXTO EXTRAÍDO ================\n")
-        print(text)
-        print("\n=================================================\n")
-
-        # ----------------------------------------------------
-        # Normalizar
-        # ----------------------------------------------------
-
         normalized = normalize_text(text)
 
-        # ----------------------------------------------------
-        # Datos de factura
-        # ----------------------------------------------------
+        invoice_number = extract_invoice_number(normalized)
+        invoice_date = extract_invoice_date(normalized)
+        total = extract_total(normalized)
+        patients = extract_patients(normalized)
 
-        invoice_number = extract_invoice_number(
-            normalized
-        )
+        items = extract_items_from_words(words, patients)
 
-        invoice_date = extract_invoice_date(
-            normalized
-        )
+        # Si l'OCR no ha llegit bé la capçalera i no hem pogut
+        # detectar el pacient, la taula igualment es llegeix per
+        # columnes. En aquest cas prenem els pacients de les
+        # pròpies files.
+        if not patients:
 
-        total = extract_total(
-            normalized
-        )
+            for item in items:
 
-        patients = extract_patients(
-            normalized
-        )
-
-        # ----------------------------------------------------
-        # Conceptos
-        # ----------------------------------------------------
-
-        items = extract_items(
-            normalized,
-            patients
-        )
+                if item["patient"] and item["patient"] not in patients:
+                    patients.append(item["patient"])
 
         print("Número factura:", invoice_number)
         print("Fecha factura:", invoice_date)
@@ -1192,10 +944,6 @@ def upload():
 
         for item in items:
             print(item)
-
-        # ----------------------------------------------------
-        # Respuesta
-        # ----------------------------------------------------
 
         return jsonify({
             "success": True,
@@ -1208,8 +956,6 @@ def upload():
 
             "items": items,
 
-            # También enviamos el texto por si el frontend
-            # lo utiliza para depuración.
             "text": normalized
         })
 
@@ -1226,29 +972,17 @@ def upload():
 
         return jsonify({
             "success": False,
-            "error": (
-                "Error procesando el PDF: "
-                + str(error)
-            )
+            "error": "Error procesando el PDF: " + str(error)
         }), 500
 
     finally:
 
-        # ----------------------------------------------------
-        # Eliminar PDF temporal
-        # ----------------------------------------------------
-
         try:
-
             if pdf_path.exists():
                 pdf_path.unlink()
 
         except Exception as error:
-
-            print(
-                "No se pudo eliminar el archivo temporal:",
-                error
-            )
+            print("No se pudo eliminar el archivo temporal:", error)
 
         gc.collect()
 

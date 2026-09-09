@@ -622,6 +622,10 @@
                             </th>
 
                             <th>
+                                PREU S/IVA
+                            </th>
+
+                            <th>
                                 IMPORT
                             </th>
                         </tr>
@@ -648,8 +652,20 @@
    CONFIGURACIÓ
    ========================================================= */
 
-const GOOGLE_APPS_SCRIPT_URL =
-    'https://script.google.com/macros/s/AKfycbxj9eVx8Qv8v8v8v8v8v8v8v8v8v8v8v8v8v8v8v8v8v8v8v8v8/exec';
+/*
+ * URL del desplegament de Google Apps Script.
+ *
+ * Es demana al servidor (/config), que la llegeix de la
+ * variable d'entorn APPS_SCRIPT_URL. Així, quan es torna a
+ * desplegar l'Apps Script i canvia la URL /exec, només cal
+ * canviar la variable a Render: no s'ha de tocar el codi.
+ *
+ * Si la variable no està posada, s'utilitza aquesta d'aquí
+ * sota com a reserva.
+ */
+
+let GOOGLE_APPS_SCRIPT_URL =
+    'https://script.google.com/macros/s/AKfycbycjdR_RTZoWWGVaciJVjWb5Zpld8FSqgg9IDu54t-mi-5ChlpOFc4KM80aANP7ErE/exec';
 
 
 let currentData = null;
@@ -669,7 +685,40 @@ document.addEventListener('DOMContentLoaded', function () {
 
     setupDragAndDrop();
 
+    loadConfig();
+
 });
+
+
+/* =========================================================
+   CONFIGURACIÓ DEL SERVIDOR
+   ========================================================= */
+
+function loadConfig() {
+
+    fetch('/config')
+
+        .then(response => response.json())
+
+        .then(config => {
+
+            if (config && config.apps_script_url) {
+
+                GOOGLE_APPS_SCRIPT_URL =
+                    config.apps_script_url;
+            }
+
+        })
+
+        .catch(error => {
+
+            console.error(
+                'No s’ha pogut llegir /config:',
+                error
+            );
+
+        });
+}
 
 
 /* =========================================================
@@ -1026,7 +1075,7 @@ function renderTable(items) {
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="5" class="empty-state">
+                <td colspan="6" class="empty-state">
                     No s’han detectat línies de factura.
                 </td>
             </tr>
@@ -1106,6 +1155,21 @@ function renderTable(items) {
             item.article || '';
 
         /*
+         * PREU S/IVA
+         *
+         * És la base de la comissió del 5%: el que va
+         * a la columna "PREU S/IVA" del full de càlcul.
+         */
+        const priceCell =
+            document.createElement('td');
+
+        priceCell.className =
+            'amount-cell';
+
+        priceCell.textContent =
+            formatMoney(item.price);
+
+        /*
          * IMPORT
          */
         const amountCell =
@@ -1121,6 +1185,7 @@ function renderTable(items) {
         tr.appendChild(dateCell);
         tr.appendChild(patientCell);
         tr.appendChild(articleCell);
+        tr.appendChild(priceCell);
         tr.appendChild(amountCell);
 
         /*
@@ -1323,12 +1388,14 @@ function itemToGoogleSheetRow(item) {
             item.article || '',
 
         /*
-         * Apps Script espera "precio"
+         * Apps Script espera "precio".
          *
-         * Enviem l'import final de la línia.
+         * La columna del full és "PREU S/IVA" i el 5% es
+         * calcula sobre aquest valor, així que enviem el
+         * preu SENSE IVA, no l'import final de la línia.
          */
         precio:
-            item.amount || ''
+            item.price || item.amount || ''
 
     };
 }
@@ -1384,6 +1451,17 @@ async function exportSelectedToGoogleSheets() {
         showAlert(
             'error',
             '❌ Selecciona un mes.'
+        );
+
+        return;
+    }
+
+    if (!GOOGLE_APPS_SCRIPT_URL) {
+
+        showAlert(
+            'error',
+            '❌ Falta configurar la variable APPS_SCRIPT_URL ' +
+            'amb la URL /exec del Google Apps Script.'
         );
 
         return;
@@ -1552,6 +1630,7 @@ function exportSelectedToCSV() {
         'DATA',
         'PACIENT',
         'ARTICLE',
+        'PREU S/IVA',
         'IMPORT'
     ];
 
@@ -1567,6 +1646,7 @@ function exportSelectedToCSV() {
             item.date || '',
             item.patient || '',
             item.article || '',
+            item.price || '',
             item.amount || ''
         ].map(csvEscape).join(';'));
 
@@ -1709,6 +1789,9 @@ function printSelected() {
                 <td>${escapeHtml(item.patient || '')}</td>
                 <td>${escapeHtml(item.article || '')}</td>
                 <td style="text-align:right;">
+                    ${escapeHtml(formatMoney(item.price))}
+                </td>
+                <td style="text-align:right;">
                     ${escapeHtml(formatMoney(item.amount))}
                 </td>
             </tr>
@@ -1800,6 +1883,7 @@ function printSelected() {
                         <th>DATA</th>
                         <th>PACIENT</th>
                         <th>ARTICLE</th>
+                        <th>PREU S/IVA</th>
                         <th>IMPORT</th>
                     </tr>
                 </thead>
