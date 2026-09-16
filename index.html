@@ -3,110 +3,152 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📄 Extractor de Factures</title>
+    <title>Extractor de Factures</title>
 
     <style>
+        :root {
+            --bg: #f3f5f9;
+            --card: #ffffff;
+            --ink: #0f172a;
+            --muted: #64748b;
+            --line: #e2e8f0;
+
+            --blue: #2563eb;
+            --blue-soft: #eef4ff;
+            --blue-line: #c7dafe;
+
+            --green: #15803d;
+            --green-soft: #effaf2;
+            --green-line: #bfe6cb;
+
+            --amber: #b45309;
+            --amber-soft: #fff7e8;
+            --amber-line: #f6d9a6;
+
+            --red: #dc2626;
+            --red-soft: #fdf0f0;
+            --red-line: #f6c7c7;
+
+            --radius: 14px;
+        }
+
         * {
             box-sizing: border-box;
         }
 
         body {
             margin: 0;
-            font-family: Arial, Helvetica, sans-serif;
-            background: #f4f6f8;
-            color: #222;
+            font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            font-size: 15px;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1280px;
             margin: 0 auto;
-            padding: 25px;
+            padding: 28px 24px 60px;
+        }
+
+        /* ---------- Capçalera ---------- */
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .logo {
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #1e3a8a, #2563eb);
+            color: white;
+            display: grid;
+            place-items: center;
+            font-size: 22px;
+            flex-shrink: 0;
         }
 
         h1 {
-            margin: 0 0 8px;
-            font-size: 30px;
+            margin: 0;
+            font-size: 24px;
+            letter-spacing: -0.02em;
         }
 
         .subtitle {
-            color: #666;
-            margin-bottom: 25px;
+            color: var(--muted);
+            font-size: 14px;
+            margin-top: 2px;
+        }
+
+        .eyebrow {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin: 0 0 12px;
         }
 
         .card {
-            background: white;
-            border-radius: 14px;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
             padding: 22px;
-            margin-bottom: 20px;
-            box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+            margin-bottom: 18px;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
         }
 
+        /* ---------- Pujada ---------- */
+
         .upload-area {
-            border: 2px dashed #aaa;
+            border: 2px dashed #cbd5e1;
             border-radius: 12px;
-            padding: 40px 20px;
+            padding: 34px 20px;
             text-align: center;
             cursor: pointer;
             transition: 0.2s;
         }
 
         .upload-area:hover {
-            border-color: #555;
-            background: #fafafa;
+            border-color: var(--blue);
+            background: var(--blue-soft);
         }
 
         .upload-area.dragover {
-            border-color: #198754;
-            background: #eefaf2;
+            border-color: var(--green);
+            background: var(--green-soft);
+        }
+
+        .upload-area h2 {
+            margin: 8px 0 4px;
+            font-size: 18px;
         }
 
         .upload-icon {
-            font-size: 48px;
-            margin-bottom: 10px;
+            font-size: 40px;
         }
 
         input[type="file"] {
             display: none;
         }
 
+        /* ---------- Botons ---------- */
+
         .btn {
-            border: 0;
-            border-radius: 9px;
-            padding: 11px 18px;
-            font-size: 15px;
-            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid transparent;
+            border-radius: 10px;
+            padding: 10px 16px;
+            font: inherit;
+            font-weight: 600;
             cursor: pointer;
-            margin: 4px;
-            transition: 0.2s;
-        }
-
-        .btn:hover {
-            opacity: 0.88;
-        }
-
-        .btn-primary {
-            background: #0d6efd;
-            color: white;
-        }
-
-        .btn-success {
-            background: #198754;
-            color: white;
-        }
-
-        .btn-secondary {
-            background: #6c757d;
-            color: white;
-        }
-
-        .btn-danger {
-            background: #dc3545;
-            color: white;
-        }
-
-        .btn-warning {
-            background: #ffc107;
-            color: #222;
+            transition: 0.15s;
+            background: white;
         }
 
         .btn:disabled {
@@ -114,18 +156,84 @@
             cursor: not-allowed;
         }
 
+        .btn-primary {
+            background: var(--blue);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #1d4ed8;
+        }
+
+        .btn-success {
+            background: var(--green);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #166534;
+        }
+
+        .btn-outline {
+            border-color: var(--line);
+            color: var(--ink);
+        }
+
+        .btn-outline:hover {
+            background: #f8fafc;
+            border-color: #cbd5e1;
+        }
+
+        .btn-sm {
+            padding: 7px 12px;
+            font-size: 13px;
+        }
+
+        /* Botons tipus pastilla (veterinari) */
+
+        .pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .pill {
+            border: 1px solid var(--line);
+            background: white;
+            border-radius: 10px;
+            padding: 9px 16px;
+            font: inherit;
+            font-weight: 600;
+            color: var(--ink);
+            cursor: pointer;
+            transition: 0.15s;
+        }
+
+        .pill:hover {
+            border-color: #cbd5e1;
+            background: #f8fafc;
+        }
+
+        .pill.active {
+            background: var(--blue-soft);
+            border-color: var(--blue-line);
+            color: var(--blue);
+        }
+
+        /* ---------- Loading / alertes ---------- */
+
         .loading {
             display: none;
             text-align: center;
-            padding: 25px;
+            padding: 28px;
         }
 
         .spinner {
-            width: 40px;
-            height: 40px;
+            width: 38px;
+            height: 38px;
             margin: 0 auto 12px;
-            border: 4px solid #ddd;
-            border-top: 4px solid #0d6efd;
+            border: 4px solid var(--line);
+            border-top-color: var(--blue);
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -138,172 +246,290 @@
 
         .alert {
             display: none;
-            padding: 14px 18px;
-            border-radius: 9px;
-            margin-bottom: 20px;
-            font-weight: bold;
+            padding: 13px 16px;
+            border-radius: 10px;
+            margin-bottom: 18px;
+            font-weight: 600;
+            border: 1px solid transparent;
         }
 
         .alert.success {
-            background: #d1e7dd;
-            color: #0f5132;
+            background: var(--green-soft);
+            border-color: var(--green-line);
+            color: var(--green);
         }
 
         .alert.error {
-            background: #f8d7da;
-            color: #842029;
+            background: var(--red-soft);
+            border-color: var(--red-line);
+            color: #991b1b;
         }
 
-        .alert.info {
-            background: #cff4fc;
-            color: #055160;
-        }
+        /* ---------- Targetes de dades ---------- */
 
-        .result-grid {
+        .stat-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
-            margin-bottom: 20px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
         }
 
-        .result-box {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 16px;
+        .stat {
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            padding: 14px 16px;
+            background: #f8fafc;
+            min-width: 0;
         }
 
-        .result-label {
+        .stat-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .stat-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            border: 1px solid currentColor;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .stat-value {
+            font-size: 22px;
+            font-weight: 800;
+            margin-top: 10px;
+            letter-spacing: -0.01em;
+            overflow-wrap: anywhere;
+        }
+
+        .stat-sub {
             font-size: 13px;
-            color: #666;
-            margin-bottom: 6px;
+            color: var(--muted);
+            margin-top: 4px;
         }
 
-        .result-value {
-            font-size: 20px;
-            font-weight: bold;
+        .stat.blue  { background: var(--blue-soft);  border-color: var(--blue-line); }
+        .stat.blue  .stat-head { color: var(--blue); }
+        .stat.green { background: var(--green-soft); border-color: var(--green-line); }
+        .stat.green .stat-head { color: var(--green); }
+        .stat.amber { background: var(--amber-soft); border-color: var(--amber-line); }
+        .stat.amber .stat-head { color: var(--amber); }
+
+        .badge {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #e2e8f0;
+            color: #334155;
+            white-space: nowrap;
         }
+
+        .badge.green { background: #dcf3e3; color: var(--green); }
+        .badge.amber { background: #fdebc8; color: var(--amber); }
+        .badge.blue  { background: #dce8fe; color: var(--blue); }
 
         .patients {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
+            gap: 6px;
+            margin-top: 10px;
         }
 
-        .patient-badge {
-            background: #e9ecef;
-            border-radius: 20px;
-            padding: 7px 13px;
-            font-weight: bold;
+        /* ---------- Exportar ---------- */
+
+        .export-grid {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 18px;
+            align-items: end;
         }
 
-        .export-controls {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        .control-group label {
-            font-size: 13px;
-            color: #555;
-            font-weight: bold;
+        .field-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 8px;
         }
 
         select {
             padding: 10px 12px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            background: white;
-            font-size: 15px;
-            min-width: 160px;
-        }
-
-        .selection-info {
-            margin: 10px 0;
-            font-weight: bold;
-        }
-
-        .table-wrapper {
-            overflow-x: auto;
+            border: 1px solid var(--line);
             border-radius: 10px;
+            background: white;
+            font: inherit;
+            font-weight: 600;
+            min-width: 200px;
+            color: var(--ink);
         }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 700px;
-        }
-
-        th,
-        td {
-            padding: 12px 10px;
-            border-bottom: 1px solid #ddd;
-            text-align: left;
-            vertical-align: middle;
-        }
-
-        th {
-            background: #343a40;
-            color: white;
-            font-weight: bold;
-        }
-
-        th:first-child,
-        td:first-child {
-            width: 45px;
-            text-align: center;
-        }
-
-        th:last-child,
-        td:last-child {
-            text-align: right;
-            white-space: nowrap;
-        }
-
-        tbody tr {
-            transition: 0.15s;
-            cursor: pointer;
-        }
-
-        tbody tr:hover {
-            background: #f1f3f5;
-        }
-
-        tbody tr.selected {
-            background: #d1e7dd !important;
-        }
-
-        tbody tr.selected:hover {
-            background: #badbcc !important;
-        }
-
-        .article-cell {
-            max-width: 700px;
-            white-space: normal;
-            line-height: 1.4;
-        }
-
-        .amount-cell {
-            font-weight: bold;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 30px;
-            color: #777;
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 18px;
         }
 
         .actions {
             display: flex;
             flex-wrap: wrap;
-            gap: 6px;
-            margin-bottom: 10px;
+            gap: 8px;
+            margin-top: 18px;
+        }
+
+        /* ---------- Taula ---------- */
+
+        .table-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .table-head h2 {
+            margin: 0;
+            font-size: 18px;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 820px;
+        }
+
+        th,
+        td {
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: 0;
+        }
+
+        th {
+            background: #f8fafc;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        th.check,
+        td.check {
+            width: 44px;
+            text-align: center;
+        }
+
+        th.num,
+        td.num {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        td.date {
+            white-space: nowrap;
+            color: var(--muted);
+        }
+
+        tbody tr {
+            cursor: pointer;
+            transition: background 0.12s;
+        }
+
+        tbody tr:hover {
+            background: #f8fafc;
+        }
+
+        tbody tr.selected {
+            background: var(--green-soft);
+        }
+
+        tbody tr.selected:hover {
+            background: #e3f5e8;
+        }
+
+        input[type="checkbox"] {
+            width: 17px;
+            height: 17px;
+            accent-color: var(--green);
+            cursor: pointer;
+        }
+
+        .article-cell {
+            line-height: 1.4;
+            font-weight: 600;
+        }
+
+        .amount {
+            font-weight: 700;
+        }
+
+        .strike {
+            display: block;
+            font-size: 12px;
+            color: var(--muted);
+            text-decoration: line-through;
+            font-weight: 400;
+        }
+
+        .half-toggle {
+            border: 1px solid var(--line);
+            background: white;
+            color: var(--muted);
+            border-radius: 999px;
+            padding: 3px 10px;
+            font: inherit;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .half-toggle.on {
+            background: #fdebc8;
+            border-color: var(--amber-line);
+            color: var(--amber);
+        }
+
+        .commission {
+            color: var(--green);
+            font-weight: 700;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 30px;
+            color: var(--muted);
+        }
+
+        .hint {
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 10px;
         }
 
         .hidden {
@@ -311,72 +537,36 @@
         }
 
         .text-muted {
-            color: #777;
+            color: var(--muted);
         }
 
         @media (max-width: 900px) {
-            .result-grid {
-                grid-template-columns: repeat(2, 1fr);
+            .stat-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .export-grid {
+                grid-template-columns: 1fr;
             }
         }
 
         @media (max-width: 600px) {
             .container {
-                padding: 12px;
+                padding: 16px 16px 40px;
             }
 
-            h1 {
-                font-size: 24px;
-            }
-
-            .result-grid {
+            .stat-grid,
+            .summary {
                 grid-template-columns: 1fr;
-            }
-
-            .export-controls {
-                flex-direction: column;
-                align-items: stretch;
             }
 
             select {
                 width: 100%;
             }
 
-            .btn {
+            .actions .btn {
                 width: 100%;
-                margin: 3px 0;
-            }
-        }
-
-        @media print {
-            body {
-                background: white;
-            }
-
-            .upload-card,
-            .export-card,
-            .actions,
-            .selection-info {
-                display: none !important;
-            }
-
-            .card {
-                box-shadow: none;
-                padding: 0;
-            }
-
-            .container {
-                max-width: none;
-                padding: 10px;
-            }
-
-            table {
-                min-width: 0;
-            }
-
-            th,
-            td {
-                border: 1px solid #aaa;
+                justify-content: center;
             }
         }
     </style>
@@ -386,41 +576,28 @@
 
 <div class="container">
 
-    <h1>📄 Extractor de Factures</h1>
-    <div class="subtitle">
-        OCR de factures → selecció de línies → Google Sheets / CSV
+    <div class="topbar">
+        <div class="logo">📄</div>
+        <div>
+            <h1>Extractor de Factures</h1>
+            <div class="subtitle">
+                OCR de factures · selecció de línies · Google Sheets / CSV
+            </div>
+        </div>
     </div>
 
     <div id="alertBox" class="alert"></div>
 
-    <!-- UPLOAD -->
+    <!-- PUJADA -->
     <div class="card upload-card">
-        <div
-            id="uploadArea"
-            class="upload-area"
-            onclick="document.getElementById('fileInput').click()"
-        >
+        <div id="uploadArea" class="upload-area">
             <div class="upload-icon">📄</div>
-
             <h2>Selecciona una factura PDF</h2>
-
-            <p class="text-muted">
-                Fes clic aquí o arrossega el PDF
-            </p>
-
-            <button
-                type="button"
-                class="btn btn-primary"
-                onclick="event.stopPropagation(); document.getElementById('fileInput').click();"
-            >
+            <p class="text-muted">Fes clic aquí o arrossega el PDF</p>
+            <button type="button" class="btn btn-primary" id="pickBtn">
                 📂 Seleccionar PDF
             </button>
-
-            <input
-                id="fileInput"
-                type="file"
-                accept="application/pdf,.pdf"
-            >
+            <input id="fileInput" type="file" accept="application/pdf,.pdf">
         </div>
     </div>
 
@@ -428,215 +605,142 @@
     <div id="loadingBox" class="card loading">
         <div class="spinner"></div>
         <strong>Processant factura...</strong>
-        <div class="text-muted">
-            Extracció de text i OCR en curs
-        </div>
+        <div class="text-muted">Extracció de text i OCR en curs</div>
     </div>
 
-    <!-- RESULTS -->
+    <!-- RESULTATS -->
     <div id="resultsSection" class="hidden">
 
         <div class="card">
+            <p class="eyebrow">Factura llegida</p>
 
-            <h2>📋 Informació de la factura</h2>
+            <div class="stat-grid">
 
-            <div class="result-grid">
-
-                <div class="result-box">
-                    <div class="result-label">
-                        Número de factura
+                <div class="stat blue">
+                    <div class="stat-head">
+                        <span class="stat-icon">#</span> Número
                     </div>
-
-                    <div
-                        id="invoiceNumber"
-                        class="result-value"
-                    >
-                        -
-                    </div>
+                    <div id="invoiceNumber" class="stat-value">-</div>
                 </div>
 
-                <div class="result-box">
-                    <div class="result-label">
-                        Data
+                <div class="stat">
+                    <div class="stat-head">
+                        <span class="stat-icon">📅</span> Data
                     </div>
-
-                    <div
-                        id="invoiceDate"
-                        class="result-value"
-                    >
-                        -
-                    </div>
+                    <div id="invoiceDate" class="stat-value">-</div>
                 </div>
 
-                <div class="result-box">
-                    <div class="result-label">
-                        Total
+                <div class="stat">
+                    <div class="stat-head">
+                        <span class="stat-icon">€</span> Total factura
                     </div>
-
-                    <div
-                        id="invoiceTotal"
-                        class="result-value"
-                    >
-                        -
-                    </div>
+                    <div id="invoiceTotal" class="stat-value">-</div>
+                    <div class="stat-sub">amb IVA</div>
                 </div>
 
-                <div class="result-box">
-                    <div class="result-label">
-                        Pacients
+                <div class="stat">
+                    <div class="stat-head">
+                        <span class="stat-icon">🐾</span> Pacients
                     </div>
-
-                    <div
-                        id="patientCount"
-                        class="result-value"
-                    >
-                        0
-                    </div>
+                    <div id="patientCount" class="stat-value">0</div>
+                    <div id="patientsList" class="patients"></div>
                 </div>
 
             </div>
-
-            <h3>🐶 Pacients</h3>
-
-            <div
-                id="patientsList"
-                class="patients"
-            ></div>
-
         </div>
 
-        <!-- EXPORT -->
+        <!-- EXPORTAR -->
         <div class="card export-card">
+            <p class="eyebrow">Exportar</p>
 
-            <h2>📤 Exportar</h2>
-
-            <div class="export-controls">
-
-                <div class="control-group">
-                    <label for="personSelect">
-                        Veterinari
-                    </label>
-
-                    <select id="personSelect">
-                        <option value="Roser">Roser</option>
-                        <option value="Carlos">Carlos</option>
-                        <option value="X">X</option>
-                        <option value="Ti">Ti</option>
-                        <option value="Laura">Laura</option>
-                        <option value="Maria">Maria</option>
-                        <option value="Sonia">Sonia</option>
-                        <option value="Sara">Sara</option>
-                    </select>
+            <div class="export-grid">
+                <div>
+                    <span class="field-label">Veterinari</span>
+                    <div id="personPills" class="pills"></div>
                 </div>
 
-                <div class="control-group">
-                    <label for="monthSelect">
-                        Mes
-                    </label>
-
+                <div>
+                    <label class="field-label" for="monthSelect">Mes</label>
                     <select id="monthSelect"></select>
                 </div>
-
             </div>
 
-            <br>
+            <div class="summary">
+
+                <div class="stat">
+                    <div class="stat-head">
+                        <span class="stat-icon">✓</span> Seleccionades
+                    </div>
+                    <div class="stat-value">
+                        <span id="selCount">0</span>
+                        <span class="badge" id="selOf">de 0</span>
+                    </div>
+                </div>
+
+                <div class="stat blue">
+                    <div class="stat-head">
+                        <span class="stat-icon">€</span> Base s/IVA
+                    </div>
+                    <div id="selBase" class="stat-value">0,00 €</div>
+                    <div id="selHalfInfo" class="stat-sub">cap línia dividida</div>
+                </div>
+
+                <div class="stat green">
+                    <div class="stat-head">
+                        <span class="stat-icon">%</span> Comissió 5 %
+                    </div>
+                    <div id="selCommission" class="stat-value">0,00 €</div>
+                    <div id="selTarget" class="stat-sub">-</div>
+                </div>
+
+            </div>
 
             <div class="actions">
-
-                <button
-                    id="googleSheetsBtn"
-                    class="btn btn-success"
-                    onclick="exportSelectedToGoogleSheets()"
-                >
-                    📊 Enviar seleccionades a Google Sheets
+                <button id="googleSheetsBtn" class="btn btn-success" onclick="exportSelectedToGoogleSheets()">
+                    📊 Enviar a Google Sheets
                 </button>
-
-                <button
-                    class="btn btn-primary"
-                    onclick="exportSelectedToCSV()"
-                >
-                    📥 Descarregar CSV seleccionades
+                <button class="btn btn-outline" onclick="exportSelectedToCSV()">
+                    📥 CSV
                 </button>
-
-                <button
-                    class="btn btn-secondary"
-                    onclick="printSelected()"
-                >
-                    🖨️ Imprimir seleccionades
+                <button class="btn btn-outline" onclick="printSelected()">
+                    🖨️ Imprimir
                 </button>
-
             </div>
-
-            <div
-                id="selectionInfo"
-                class="selection-info"
-            >
-                0 de 0 línies seleccionades
-            </div>
-
         </div>
 
-        <!-- TABLE -->
+        <!-- TAULA -->
         <div class="card">
 
-            <h2>🧾 Línies de la factura</h2>
-
-            <div class="actions">
-
-                <button
-                    class="btn btn-secondary"
-                    onclick="selectAllRows()"
-                >
-                    ☑️ Seleccionar totes
-                </button>
-
-                <button
-                    class="btn btn-warning"
-                    onclick="deselectAllRows()"
-                >
-                    ⬜ Deseleccionar totes
-                </button>
-
+            <div class="table-head">
+                <h2>Línies de la factura</h2>
+                <div class="pills">
+                    <button class="btn btn-outline btn-sm" onclick="selectAllRows()">☑️ Totes</button>
+                    <button class="btn btn-outline btn-sm" onclick="deselectAllRows()">⬜ Cap</button>
+                </div>
             </div>
 
             <div class="table-wrapper">
-
                 <table>
-
                     <thead>
                         <tr>
-                            <th>
-                                ✓
-                            </th>
-
-                            <th>
-                                DATA
-                            </th>
-
-                            <th>
-                                PACIENT
-                            </th>
-
-                            <th>
-                                ARTICLE
-                            </th>
-
-                            <th>
-                                PREU S/IVA
-                            </th>
-
-                            <th>
-                                IMPORT
-                            </th>
+                            <th class="check">✓</th>
+                            <th>Data</th>
+                            <th>Pacient</th>
+                            <th>Article</th>
+                            <th class="num">Preu s/IVA</th>
+                            <th class="num">÷2</th>
+                            <th class="num">Al full</th>
+                            <th class="num">5 %</th>
+                            <th class="num">Import</th>
                         </tr>
                     </thead>
-
-                    <tbody id="invoiceTableBody">
-
-                    </tbody>
-
+                    <tbody id="invoiceTableBody"></tbody>
                 </table>
+            </div>
 
+            <div class="hint">
+                ÷2 s'activa sol a hospitalització 24 h, medicació i alimentació.
+                Pots canviar-lo a mà fent clic al botó de la línia.
             </div>
 
         </div>
@@ -663,14 +767,28 @@
  * Si la variable no està posada, s'utilitza aquesta d'aquí
  * sota com a reserva.
  */
-
 let GOOGLE_APPS_SCRIPT_URL =
     'https://script.google.com/macros/s/AKfycbycjdR_RTZoWWGVaciJVjWb5Zpld8FSqgg9IDu54t-mi-5ChlpOFc4KM80aANP7ErE/exec';
 
+const PERSONS = ['Roser', 'Carlos', 'X', 'Ti', 'Laura', 'Maria', 'Sonia', 'Sara'];
+
+const MONTHS = [
+    'Gener', 'Febrer', 'Març', 'Abril', 'Maig', 'Juny',
+    'Juliol', 'Agost', 'Setembre', 'Octubre', 'Novembre', 'Desembre'
+];
 
 let currentData = null;
 
 let selectedRowIndexes = new Set();
+
+/*
+ * Índex de línia -> true/false.
+ * Si l'usuari toca el botó ÷2 d'una línia, manda el que ha
+ * triat; si no, s'aplica la regla automàtica.
+ */
+let halfOverrides = new Map();
+
+let selectedPerson = PERSONS[0];
 
 
 /* =========================================================
@@ -681,42 +799,31 @@ document.addEventListener('DOMContentLoaded', function () {
 
     populateMonths();
 
+    renderPersonPills();
+
     setupFileInput();
 
     setupDragAndDrop();
 
     loadConfig();
 
+    document.getElementById('monthSelect')
+        .addEventListener('change', updateSelectionUI);
+
 });
 
-
-/* =========================================================
-   CONFIGURACIÓ DEL SERVIDOR
-   ========================================================= */
 
 function loadConfig() {
 
     fetch('/config')
-
         .then(response => response.json())
-
         .then(config => {
-
             if (config && config.apps_script_url) {
-
-                GOOGLE_APPS_SCRIPT_URL =
-                    config.apps_script_url;
+                GOOGLE_APPS_SCRIPT_URL = config.apps_script_url;
             }
-
         })
-
         .catch(error => {
-
-            console.error(
-                'No s’ha pogut llegir /config:',
-                error
-            );
-
+            console.error('No s’ha pogut llegir /config:', error);
         });
 }
 
@@ -725,66 +832,143 @@ function loadConfig() {
    MESOS
    ========================================================= */
 
+/*
+ * Llista des de 12 mesos enrere fins a 2 endavant, amb el mes
+ * actual seleccionat per defecte. Travessa el canvi d'any: al
+ * gener es pot triar encara el desembre anterior.
+ */
 function populateMonths() {
 
-    const monthSelect =
-        document.getElementById('monthSelect');
+    const monthSelect = document.getElementById('monthSelect');
 
     monthSelect.innerHTML = '';
 
-    const months = [
-        'Gener',
-        'Febrer',
-        'Març',
-        'Abril',
-        'Maig',
-        'Juny',
-        'Juliol',
-        'Agost',
-        'Setembre',
-        'Octubre',
-        'Novembre',
-        'Desembre'
-    ];
-
     const now = new Date();
 
-    const currentYear = now.getFullYear();
+    for (let offset = 2; offset >= -12; offset--) {
 
-    const currentMonth = now.getMonth();
+        const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
 
-    /*
-     * El mes sempre és el mes actual.
-     *
-     * Les comissions es passen del mes que s'està treballant,
-     * així que deixar triar un altre mes només porta a enviar
-     * línies a la pestanya equivocada.
-     */
-    const option =
-        document.createElement('option');
+        const value =
+            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-    option.value =
-        `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+        const option = document.createElement('option');
 
-    option.textContent =
-        `${months[currentMonth]} ${currentYear}`;
+        option.value = value;
+        option.textContent = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 
-    monthSelect.appendChild(option);
+        if (offset === 0) {
+            option.textContent += ' (actual)';
+            option.selected = true;
+        }
 
-    monthSelect.value = option.value;
+        monthSelect.appendChild(option);
+    }
 
-    monthSelect.disabled = true;
+    monthSelect.disabled = false;
+}
+
+
+function selectedMonthLabel() {
+
+    const select = document.getElementById('monthSelect');
+    const option = select.options[select.selectedIndex];
+
+    return option ? option.textContent.replace(' (actual)', '') : '';
 }
 
 
 /* =========================================================
-   FILE INPUT
+   VETERINARI
+   ========================================================= */
+
+function renderPersonPills() {
+
+    const container = document.getElementById('personPills');
+
+    container.innerHTML = '';
+
+    PERSONS.forEach(person => {
+
+        const pill = document.createElement('button');
+
+        pill.type = 'button';
+        pill.className = 'pill' + (person === selectedPerson ? ' active' : '');
+        pill.textContent = person;
+
+        pill.addEventListener('click', function () {
+            selectedPerson = person;
+            renderPersonPills();
+            updateSelectionUI();
+        });
+
+        container.appendChild(pill);
+    });
+}
+
+
+/* =========================================================
+   REGLA ÷2
+   =========================================================
+
+   Ha de ser la mateixa que isHalfPriceArticle() de l'Apps
+   Script. Les factures d'AniCura venen en castellà
+   ("HOSPITALIZACION ESTANDAR HASTA 24 HORAS GATO"), per això
+   es mira tant el castellà com el català.
+*/
+
+function normalizeArticle(text) {
+
+    return String(text || '')
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
+}
+
+
+function isHalfPriceArticle(text) {
+
+    const t = normalizeArticle(text);
+
+    const hospital24h =
+        /hospitali(z|tz)acio/.test(t) &&
+        /24\s*(h\b|hrs?\b|hores|horas)/.test(t);
+
+    return hospital24h ||
+        t.includes('medicacio') ||
+        t.includes('alimentacio');
+}
+
+
+function isRowHalved(index) {
+
+    if (halfOverrides.has(index)) {
+        return halfOverrides.get(index);
+    }
+
+    const item = currentData.items[index];
+
+    return isHalfPriceArticle(item && item.article);
+}
+
+
+/* =========================================================
+   FITXER / DRAG & DROP
    ========================================================= */
 
 function setupFileInput() {
 
-    const fileInput =
-        document.getElementById('fileInput');
+    const fileInput = document.getElementById('fileInput');
+
+    document.getElementById('uploadArea')
+        .addEventListener('click', () => fileInput.click());
+
+    document.getElementById('pickBtn')
+        .addEventListener('click', e => {
+            e.stopPropagation();
+            fileInput.click();
+        });
 
     fileInput.addEventListener('change', function () {
 
@@ -794,31 +978,23 @@ function setupFileInput() {
 
         uploadFile(this.files[0]);
 
+        // Permet tornar a pujar el mateix fitxer.
+        this.value = '';
     });
 }
 
 
-/* =========================================================
-   DRAG & DROP
-   ========================================================= */
-
 function setupDragAndDrop() {
 
-    const uploadArea =
-        document.getElementById('uploadArea');
+    const uploadArea = document.getElementById('uploadArea');
 
     uploadArea.addEventListener('dragover', function (e) {
-
         e.preventDefault();
-
         uploadArea.classList.add('dragover');
-
     });
 
     uploadArea.addEventListener('dragleave', function () {
-
         uploadArea.classList.remove('dragover');
-
     });
 
     uploadArea.addEventListener('drop', function (e) {
@@ -829,33 +1005,15 @@ function setupDragAndDrop() {
 
         const files = e.dataTransfer.files;
 
-        if (!files || !files.length) {
-            return;
+        if (files && files.length) {
+            uploadFile(files[0]);
         }
-
-        const file = files[0];
-
-        if (
-            file.type !== 'application/pdf' &&
-            !file.name.toLowerCase().endsWith('.pdf')
-        ) {
-
-            showAlert(
-                'error',
-                '❌ Només es poden pujar fitxers PDF.'
-            );
-
-            return;
-        }
-
-        uploadFile(file);
-
     });
 }
 
 
 /* =========================================================
-   UPLOAD
+   PUJADA
    ========================================================= */
 
 function uploadFile(file) {
@@ -868,17 +1026,11 @@ function uploadFile(file) {
         file.type !== 'application/pdf' &&
         !file.name.toLowerCase().endsWith('.pdf')
     ) {
-
-        showAlert(
-            'error',
-            '❌ El fitxer seleccionat no és un PDF.'
-        );
-
+        showAlert('error', '❌ El fitxer seleccionat no és un PDF.');
         return;
     }
 
-    const formData =
-        new FormData();
+    const formData = new FormData();
 
     formData.append('file', file);
 
@@ -898,62 +1050,31 @@ function uploadFile(file) {
         try {
             data = await response.json();
         } catch (error) {
-
-            throw new Error(
-                'El servidor ha retornat una resposta no vàlida.'
-            );
+            throw new Error('El servidor ha retornat una resposta no vàlida.');
         }
 
-        if (!response.ok) {
-
-            throw new Error(
-                data.error ||
-                'Error del servidor.'
-            );
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'No s’ha pogut processar el PDF.');
         }
 
         return data;
-
     })
 
     .then(data => {
 
-        if (!data.success) {
-
-            throw new Error(
-                data.error ||
-                'No s’ha pogut processar el PDF.'
-            );
-        }
-
-        /*
-         * IMPORTANT:
-         *
-         * app.py retorna:
-         *
-         * {
-         *   success: true,
-         *   invoice_number: ...,
-         *   invoice_date: ...,
-         *   total: ...,
-         *   patients: [...],
-         *   items: [...]
-         * }
-         *
-         * Per això NO fem data.data.
-         */
-
         currentData = data;
+
+        if (!Array.isArray(currentData.items)) {
+            currentData.items = [];
+        }
 
         selectedRowIndexes.clear();
 
+        halfOverrides.clear();
+
         displayResults(data);
 
-        showAlert(
-            'success',
-            '✅ Arxiu processat correctament'
-        );
-
+        showAlert('success', '✅ Factura processada correctament');
     })
 
     .catch(error => {
@@ -962,18 +1083,12 @@ function uploadFile(file) {
 
         showAlert(
             'error',
-            '❌ ' + (
-                error.message ||
-                'No s’ha pogut processar el PDF.'
-            )
+            '❌ ' + (error.message || 'No s’ha pogut processar el PDF.')
         );
-
     })
 
     .finally(() => {
-
         showLoading(false);
-
     });
 }
 
@@ -984,74 +1099,43 @@ function uploadFile(file) {
 
 function displayResults(data) {
 
-    document.getElementById('resultsSection')
-        .classList.remove('hidden');
+    document.getElementById('resultsSection').classList.remove('hidden');
 
-    document.getElementById('invoiceNumber')
-        .textContent =
-            data.invoice_number || '-';
+    document.getElementById('invoiceNumber').textContent =
+        data.invoice_number || '-';
 
-    document.getElementById('invoiceDate')
-        .textContent =
-            data.invoice_date || '-';
+    document.getElementById('invoiceDate').textContent =
+        data.invoice_date || '-';
 
-    document.getElementById('invoiceTotal')
-        .textContent =
-            data.total || '-';
+    document.getElementById('invoiceTotal').textContent =
+        data.total ? formatMoney(data.total) : '-';
 
-    const patients =
-        Array.isArray(data.patients)
-            ? data.patients
-            : [];
+    const patients = Array.isArray(data.patients) ? data.patients : [];
 
-    document.getElementById('patientCount')
-        .textContent =
-            patients.length;
+    document.getElementById('patientCount').textContent = patients.length;
 
     renderPatients(patients);
 
-    renderTable(
-        Array.isArray(data.items)
-            ? data.items
-            : []
-    );
+    renderTable();
 
     updateSelectionUI();
 }
 
 
-/* =========================================================
-   PACIENTS
-   ========================================================= */
-
 function renderPatients(patients) {
 
-    const container =
-        document.getElementById('patientsList');
+    const container = document.getElementById('patientsList');
 
     container.innerHTML = '';
 
-    if (!patients.length) {
-
-        container.innerHTML =
-            '<span class="text-muted">No s’han detectat pacients</span>';
-
-        return;
-    }
-
     patients.forEach(patient => {
 
-        const badge =
-            document.createElement('span');
+        const badge = document.createElement('span');
 
-        badge.className =
-            'patient-badge';
-
-        badge.textContent =
-            patient;
+        badge.className = 'badge blue';
+        badge.textContent = patient;
 
         container.appendChild(badge);
-
     });
 }
 
@@ -1060,10 +1144,11 @@ function renderPatients(patients) {
    TAULA
    ========================================================= */
 
-function renderTable(items) {
+function renderTable() {
 
-    const tbody =
-        document.getElementById('invoiceTableBody');
+    const tbody = document.getElementById('invoiceTableBody');
+
+    const items = currentData ? currentData.items : [];
 
     tbody.innerHTML = '';
 
@@ -1071,7 +1156,7 @@ function renderTable(items) {
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="empty-state">
+                <td colspan="9" class="empty-state">
                     No s’han detectat línies de factura.
                 </td>
             </tr>
@@ -1082,136 +1167,98 @@ function renderTable(items) {
 
     items.forEach((item, index) => {
 
-        const tr =
-            document.createElement('tr');
+        const tr = document.createElement('tr');
 
-        if (selectedRowIndexes.has(index)) {
+        const selected = selectedRowIndexes.has(index);
+        const halved = isRowHalved(index);
+
+        const price = parseAmount(item.price || item.amount);
+        const sheetPrice = sheetPriceFor(index);
+
+        if (selected) {
             tr.classList.add('selected');
         }
 
-        /*
-         * Checkbox
-         */
-        const checkboxCell =
-            document.createElement('td');
+        tr.innerHTML = `
+            <td class="check">
+                <input type="checkbox" ${selected ? 'checked' : ''}>
+            </td>
+            <td class="date">${escapeHtml(item.date || '')}</td>
+            <td>${escapeHtml(item.patient || '')}</td>
+            <td class="article-cell">${escapeHtml(item.article || '')}</td>
+            <td class="num">${escapeHtml(formatMoney(price))}</td>
+            <td class="num">
+                <button type="button" class="half-toggle ${halved ? 'on' : ''}"
+                        title="Dividir el preu entre 2">
+                    ${halved ? '÷2' : 'no'}
+                </button>
+            </td>
+            <td class="num amount">${escapeHtml(formatMoney(sheetPrice))}</td>
+            <td class="num commission">${escapeHtml(formatMoney(commissionOf(sheetPrice)))}</td>
+            <td class="num text-muted">${escapeHtml(formatMoney(item.amount))}</td>
+        `;
 
-        const checkbox =
-            document.createElement('input');
+        tr.querySelector('input').addEventListener('change', function () {
+            setRowSelected(index, this.checked);
+        });
 
-        checkbox.type = 'checkbox';
-
-        checkbox.checked =
-            selectedRowIndexes.has(index);
-
-        checkbox.addEventListener('click', function (e) {
-
+        tr.querySelector('.half-toggle').addEventListener('click', function (e) {
             e.stopPropagation();
-
+            halfOverrides.set(index, !isRowHalved(index));
+            renderTable();
+            updateSelectionUI();
         });
 
-        checkbox.addEventListener('change', function () {
-
-            setRowSelected(
-                index,
-                this.checked
-            );
-
-        });
-
-        checkboxCell.appendChild(checkbox);
-
-        /*
-         * DATA
-         */
-        const dateCell =
-            document.createElement('td');
-
-        dateCell.textContent =
-            item.date || '';
-
-        /*
-         * PACIENT
-         */
-        const patientCell =
-            document.createElement('td');
-
-        patientCell.textContent =
-            item.patient || '';
-
-        /*
-         * ARTICLE
-         */
-        const articleCell =
-            document.createElement('td');
-
-        articleCell.className =
-            'article-cell';
-
-        articleCell.textContent =
-            item.article || '';
-
-        /*
-         * PREU S/IVA
-         *
-         * És la base de la comissió del 5%: el que va
-         * a la columna "PREU S/IVA" del full de càlcul.
-         */
-        const priceCell =
-            document.createElement('td');
-
-        priceCell.className =
-            'amount-cell';
-
-        priceCell.textContent =
-            formatMoney(item.price);
-
-        /*
-         * IMPORT
-         */
-        const amountCell =
-            document.createElement('td');
-
-        amountCell.className =
-            'amount-cell';
-
-        amountCell.textContent =
-            formatMoney(item.amount);
-
-        tr.appendChild(checkboxCell);
-        tr.appendChild(dateCell);
-        tr.appendChild(patientCell);
-        tr.appendChild(articleCell);
-        tr.appendChild(priceCell);
-        tr.appendChild(amountCell);
-
-        /*
-         * Fer clic a tota la fila
-         * per seleccionar-la.
-         */
         tr.addEventListener('click', function (e) {
 
             if (e.target.tagName.toLowerCase() === 'input') {
                 return;
             }
 
-            const newState =
-                !selectedRowIndexes.has(index);
-
-            setRowSelected(
-                index,
-                newState
-            );
-
+            setRowSelected(index, !selectedRowIndexes.has(index));
         });
 
         tbody.appendChild(tr);
-
     });
 }
 
 
 /* =========================================================
-   SELECCIÓ DE FILES
+   IMPORTS
+   ========================================================= */
+
+/*
+ * Preu que acabarà a la columna "PREU S/IVA" del full:
+ * el preu sense IVA, dividit entre 2 si toca.
+ */
+function sheetPriceFor(index) {
+
+    const item = currentData.items[index];
+
+    const price = parseAmount(item.price || item.amount);
+
+    if (price === null) {
+        return null;
+    }
+
+    return isRowHalved(index) ? round2(price / 2) : price;
+}
+
+
+function commissionOf(value) {
+
+    return value === null ? null : round2(value * 0.05);
+}
+
+
+function round2(value) {
+
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+
+/* =========================================================
+   SELECCIÓ
    ========================================================= */
 
 function setRowSelected(index, selected) {
@@ -1222,178 +1269,107 @@ function setRowSelected(index, selected) {
         selectedRowIndexes.delete(index);
     }
 
-    updateTableSelectionVisual(index);
+    const row = document.getElementById('invoiceTableBody')
+        .querySelectorAll('tr')[index];
+
+    if (row) {
+        row.classList.toggle('selected', selected);
+
+        const checkbox = row.querySelector('input[type="checkbox"]');
+
+        if (checkbox) {
+            checkbox.checked = selected;
+        }
+    }
 
     updateSelectionUI();
 }
 
-
-function updateTableSelectionVisual(index) {
-
-    const tbody =
-        document.getElementById('invoiceTableBody');
-
-    const rows =
-        tbody.querySelectorAll('tr');
-
-    if (!rows[index]) {
-        return;
-    }
-
-    const row =
-        rows[index];
-
-    const checkbox =
-        row.querySelector('input[type="checkbox"]');
-
-    if (selectedRowIndexes.has(index)) {
-
-        row.classList.add('selected');
-
-        if (checkbox) {
-            checkbox.checked = true;
-        }
-
-    } else {
-
-        row.classList.remove('selected');
-
-        if (checkbox) {
-            checkbox.checked = false;
-        }
-
-    }
-}
-
-
-/* =========================================================
-   ACTUALITZAR SELECCIÓ
-   ========================================================= */
 
 function updateSelectionUI() {
 
-    const total =
-        currentData &&
-        Array.isArray(currentData.items)
-            ? currentData.items.length
-            : 0;
+    const total = currentData ? currentData.items.length : 0;
 
-    const selected =
-        selectedRowIndexes.size;
+    let base = 0;
+    let halvedCount = 0;
 
-    document.getElementById('selectionInfo')
-        .textContent =
-            `${selected} de ${total} línies seleccionades`;
+    selectedRowIndexes.forEach(index => {
 
+        const value = sheetPriceFor(index);
+
+        if (value !== null) {
+            base += value;
+        }
+
+        if (isRowHalved(index)) {
+            halvedCount++;
+        }
+    });
+
+    document.getElementById('selCount').textContent = selectedRowIndexes.size;
+
+    document.getElementById('selOf').textContent = `de ${total}`;
+
+    document.getElementById('selBase').textContent = formatMoney(round2(base));
+
+    document.getElementById('selHalfInfo').textContent =
+        halvedCount
+            ? `${halvedCount} línia(es) dividides entre 2`
+            : 'cap línia dividida';
+
+    document.getElementById('selCommission').textContent =
+        formatMoney(commissionOf(round2(base)));
+
+    document.getElementById('selTarget').textContent =
+        `${selectedPerson} · ${selectedMonthLabel()}`;
 }
 
 
-/* =========================================================
-   SELECCIONAR TOTES
-   ========================================================= */
-
 function selectAllRows() {
 
-    if (
-        !currentData ||
-        !Array.isArray(currentData.items)
-    ) {
+    if (!currentData) {
         return;
     }
 
-    selectedRowIndexes.clear();
+    selectedRowIndexes = new Set(currentData.items.map((item, index) => index));
 
-    currentData.items.forEach((item, index) => {
-
-        selectedRowIndexes.add(index);
-
-    });
-
-    renderTable(currentData.items);
+    renderTable();
 
     updateSelectionUI();
 }
 
-
-/* =========================================================
-   DESELECCIONAR TOTES
-   ========================================================= */
 
 function deselectAllRows() {
 
     selectedRowIndexes.clear();
 
-    if (
-        currentData &&
-        Array.isArray(currentData.items)
-    ) {
-
-        renderTable(currentData.items);
-
+    if (currentData) {
+        renderTable();
     }
 
     updateSelectionUI();
 }
 
 
-/* =========================================================
-   OBTENIR FILES SELECCIONADES
-   ========================================================= */
+function getSelectedIndexes() {
 
-function getSelectedRows() {
-
-    if (
-        !currentData ||
-        !Array.isArray(currentData.items)
-    ) {
-        return [];
-    }
-
-    return currentData.items
-        .filter((item, index) =>
-            selectedRowIndexes.has(index)
-        );
+    return Array.from(selectedRowIndexes).sort((a, b) => a - b);
 }
 
 
-/* =========================================================
-   CONVERTIR ITEM DEL BACKEND
-   AL FORMAT QUE ESPERA APPS SCRIPT
-   ========================================================= */
+function checkCanExport() {
 
-function itemToGoogleSheetRow(item) {
+    if (!currentData) {
+        showAlert('error', '❌ Primer has de carregar una factura.');
+        return false;
+    }
 
-    return {
+    if (!selectedRowIndexes.size) {
+        showAlert('error', '❌ Selecciona almenys una línia.');
+        return false;
+    }
 
-        /*
-         * Apps Script espera "fecha"
-         */
-        fecha:
-            item.date || '',
-
-        /*
-         * Apps Script espera "factura"
-         */
-        factura:
-            currentData.invoice_number || '',
-
-        /*
-         * Apps Script espera "articulo"
-         */
-        articulo:
-            item.article || '',
-
-        /*
-         * Apps Script espera "precio".
-         *
-         * La columna del full és "PREU S/IVA" i el 5% es
-         * calcula sobre aquest valor, així que enviem el
-         * preu SENSE IVA, no l'import final de la línia.
-         */
-        precio:
-            item.price || item.amount || ''
-
-    };
+    return true;
 }
 
 
@@ -1401,169 +1377,97 @@ function itemToGoogleSheetRow(item) {
    GOOGLE SHEETS
    ========================================================= */
 
+/*
+ * Converteix una línia al format que espera l'Apps Script.
+ *
+ * "precio" és el preu SENSE IVA original, sense dividir.
+ * "meitat" diu si l'Apps Script l'ha de dividir entre 2:
+ * així la decisió que es veu a la pantalla (inclosos els
+ * canvis fets a mà) és exactament la que s'aplica al full.
+ */
+function itemToGoogleSheetRow(index) {
+
+    const item = currentData.items[index];
+
+    return {
+        fecha: item.date || '',
+        factura: currentData.invoice_number || '',
+        articulo: item.article || '',
+        precio: item.price || item.amount || '',
+        meitat: isRowHalved(index)
+    };
+}
+
+
 async function exportSelectedToGoogleSheets() {
 
-    if (!currentData) {
-
-        showAlert(
-            'error',
-            '❌ Primer has de carregar una factura.'
-        );
-
+    if (!checkCanExport()) {
         return;
     }
 
-    const selectedRows =
-        getSelectedRows();
-
-    if (!selectedRows.length) {
-
-        showAlert(
-            'error',
-            '❌ Selecciona almenys una línia.'
-        );
-
-        return;
-    }
-
-    const person =
-        document.getElementById('personSelect').value;
-
-    const month =
-        document.getElementById('monthSelect').value;
-
-    if (!person) {
-
-        showAlert(
-            'error',
-            '❌ Selecciona un veterinari.'
-        );
-
-        return;
-    }
-
-    if (!month) {
-
-        showAlert(
-            'error',
-            '❌ Selecciona un mes.'
-        );
-
-        return;
-    }
+    const month = document.getElementById('monthSelect').value;
 
     if (!GOOGLE_APPS_SCRIPT_URL) {
-
         showAlert(
             'error',
             '❌ Falta configurar la variable APPS_SCRIPT_URL ' +
             'amb la URL /exec del Google Apps Script.'
         );
-
         return;
     }
 
-    const button =
-        document.getElementById('googleSheetsBtn');
+    const button = document.getElementById('googleSheetsBtn');
 
-    const originalText =
-        button.textContent;
+    const originalText = button.textContent;
 
     button.disabled = true;
-
-    button.textContent =
-        '⏳ Enviant...';
-
-    /*
-     * Convertim els camps nous de app.py
-     * als camps antics que espera Apps Script.
-     */
-    const tableRows =
-        selectedRows.map(item =>
-            itemToGoogleSheetRow(item)
-        );
+    button.textContent = '⏳ Enviant...';
 
     const payload = {
-
-        person: person,
-
+        person: selectedPerson,
         month: month,
-
         invoice: {
-
-            invoice_number:
-                currentData.invoice_number || '',
-
-            invoice_date:
-                currentData.invoice_date || '',
-
-            total:
-                currentData.total || '',
-
-            patients:
-                currentData.patients || []
-
+            invoice_number: currentData.invoice_number || '',
+            invoice_date: currentData.invoice_date || '',
+            total: currentData.total || '',
+            patients: currentData.patients || []
         },
-
-        table_rows:
-            tableRows
-
+        table_rows: getSelectedIndexes().map(itemToGoogleSheetRow)
     };
 
     try {
 
-        const response =
-            await fetch(
-                GOOGLE_APPS_SCRIPT_URL,
-                {
-                    method: 'POST',
+        const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain;charset=utf-8'
+            },
+            body: JSON.stringify(payload)
+        });
 
-                    headers: {
-                        'Content-Type':
-                            'text/plain;charset=utf-8'
-                    },
-
-                    body:
-                        JSON.stringify(payload)
-                }
-            );
-
-        const text =
-            await response.text();
+        const text = await response.text();
 
         let result;
 
         try {
-
-            result =
-                JSON.parse(text);
-
+            result = JSON.parse(text);
         } catch (parseError) {
-
-            console.error(
-                'Resposta Google Apps Script:',
-                text
-            );
-
-            throw new Error(
-                'Google Apps Script no ha retornat un JSON vàlid.'
-            );
+            console.error('Resposta Google Apps Script:', text);
+            throw new Error('Google Apps Script no ha retornat un JSON vàlid.');
         }
 
-        if (result.ok) {
-
-            showAlert(
-                'success',
-                `✅ S’han enviat ${result.exported_rows} línia(es) correctament a ${result.person} (${result.sheet_name})`
-            );
-
-        } else {
-
-            throw new Error(
-                result.error ||
-                'Error desconegut de Google Apps Script.'
-            );
+        if (!result.ok) {
+            throw new Error(result.error || 'Error desconegut de Google Apps Script.');
         }
+
+        const halved = result.halved_rows
+            ? ` · ${result.halved_rows} dividides entre 2`
+            : '';
+
+        showAlert(
+            'success',
+            `✅ ${result.exported_rows} línia(es) enviades a ${result.person} (${result.sheet_name})${halved}`
+        );
 
     } catch (error) {
 
@@ -1572,19 +1476,13 @@ async function exportSelectedToGoogleSheets() {
         showAlert(
             'error',
             '❌ Error de Google Sheets: ' +
-            (
-                error.message ||
-                'No s’ha pogut enviar la informació.'
-            )
+            (error.message || 'No s’ha pogut enviar la informació.')
         );
 
     } finally {
 
         button.disabled = false;
-
-        button.textContent =
-            originalText;
-
+        button.textContent = originalText;
     }
 }
 
@@ -1595,133 +1493,71 @@ async function exportSelectedToGoogleSheets() {
 
 function exportSelectedToCSV() {
 
-    if (!currentData) {
-
-        showAlert(
-            'error',
-            '❌ Primer has de carregar una factura.'
-        );
-
+    if (!checkCanExport()) {
         return;
     }
 
-    const selectedRows =
-        getSelectedRows();
-
-    if (!selectedRows.length) {
-
-        showAlert(
-            'error',
-            '❌ Selecciona almenys una línia.'
-        );
-
-        return;
-    }
-
-    /*
-     * CSV amb les mateixes 4 columnes
-     * que es veuen a la taula.
-     */
     const headers = [
-        'DATA',
-        'PACIENT',
-        'ARTICLE',
-        'PREU S/IVA',
-        'IMPORT'
+        'DATA', 'PACIENT', 'ARTICLE', 'PREU S/IVA', '÷2',
+        'PREU AL FULL', '5%', 'IMPORT'
     ];
 
-    const csvRows = [];
+    const csvRows = [headers.map(csvEscape).join(';')];
 
-    csvRows.push(
-        headers.map(csvEscape).join(';')
-    );
+    getSelectedIndexes().forEach(index => {
 
-    selectedRows.forEach(item => {
+        const item = currentData.items[index];
+        const sheetPrice = sheetPriceFor(index);
 
         csvRows.push([
             item.date || '',
             item.patient || '',
             item.article || '',
             item.price || '',
+            isRowHalved(index) ? 'SI' : 'NO',
+            numberForCsv(sheetPrice),
+            numberForCsv(commissionOf(sheetPrice)),
             item.amount || ''
         ].map(csvEscape).join(';'));
-
     });
 
-    const csvContent =
-        '\uFEFF' +
-        csvRows.join('\r\n');
+    const blob = new Blob(
+        ['﻿' + csvRows.join('\r\n')],
+        { type: 'text/csv;charset=utf-8;' }
+    );
 
-    const blob =
-        new Blob(
-            [csvContent],
-            {
-                type:
-                    'text/csv;charset=utf-8;'
-            }
-        );
+    const url = URL.createObjectURL(blob);
 
-    const url =
-        URL.createObjectURL(blob);
-
-    const link =
-        document.createElement('a');
+    const link = document.createElement('a');
 
     link.href = url;
-
-    link.download =
-        buildCSVFileName();
+    link.download = `${currentData.invoice_number || 'factura'}_seleccionades.csv`;
 
     document.body.appendChild(link);
-
     link.click();
-
     document.body.removeChild(link);
 
     URL.revokeObjectURL(url);
 
-    showAlert(
-        'success',
-        `✅ CSV descarregat amb ${selectedRows.length} línia(es)`
-    );
+    showAlert('success', `✅ CSV descarregat amb ${selectedRowIndexes.size} línia(es)`);
+}
+
+
+function numberForCsv(value) {
+
+    return value === null ? '' : value.toFixed(2).replace('.', ',');
 }
 
 
 function csvEscape(value) {
 
-    const text =
-        String(
-            value === null ||
-            value === undefined
-                ? ''
-                : value
-        );
+    const text = String(value === null || value === undefined ? '' : value);
 
-    if (
-        text.includes(';') ||
-        text.includes('"') ||
-        text.includes('\n') ||
-        text.includes('\r')
-    ) {
-
-        return '"' +
-            text.replace(/"/g, '""') +
-            '"';
+    if (/[;"\r\n]/.test(text)) {
+        return '"' + text.replace(/"/g, '""') + '"';
     }
 
     return text;
-}
-
-
-function buildCSVFileName() {
-
-    const invoice =
-        currentData &&
-        currentData.invoice_number
-            ? currentData.invoice_number
-            : 'factura';
-
-    return `${invoice}_seleccionades.csv`;
 }
 
 
@@ -1731,182 +1567,93 @@ function buildCSVFileName() {
 
 function printSelected() {
 
-    if (!currentData) {
-
-        showAlert(
-            'error',
-            '❌ Primer has de carregar una factura.'
-        );
-
+    if (!checkCanExport()) {
         return;
     }
 
-    const selectedRows =
-        getSelectedRows();
-
-    if (!selectedRows.length) {
-
-        showAlert(
-            'error',
-            '❌ Selecciona almenys una línia.'
-        );
-
-        return;
-    }
-
-    /*
-     * Creem una finestra temporal
-     * només amb les files seleccionades.
-     */
-    const printWindow =
-        window.open(
-            '',
-            '_blank',
-            'width=1000,height=700'
-        );
+    const printWindow = window.open('', '_blank', 'width=1000,height=700');
 
     if (!printWindow) {
-
-        showAlert(
-            'error',
-            '❌ El navegador ha bloquejat la finestra d’impressió.'
-        );
-
+        showAlert('error', '❌ El navegador ha bloquejat la finestra d’impressió.');
         return;
     }
 
-    let rowsHtml = '';
+    let base = 0;
 
-    selectedRows.forEach(item => {
+    const rowsHtml = getSelectedIndexes().map(index => {
 
-        rowsHtml += `
+        const item = currentData.items[index];
+        const sheetPrice = sheetPriceFor(index);
+
+        if (sheetPrice !== null) {
+            base += sheetPrice;
+        }
+
+        return `
             <tr>
                 <td>${escapeHtml(item.date || '')}</td>
                 <td>${escapeHtml(item.patient || '')}</td>
-                <td>${escapeHtml(item.article || '')}</td>
-                <td style="text-align:right;">
-                    ${escapeHtml(formatMoney(item.price))}
-                </td>
-                <td style="text-align:right;">
-                    ${escapeHtml(formatMoney(item.amount))}
-                </td>
+                <td>${escapeHtml(item.article || '')}${isRowHalved(index) ? ' <b>(÷2)</b>' : ''}</td>
+                <td class="right">${escapeHtml(formatMoney(sheetPrice))}</td>
+                <td class="right">${escapeHtml(formatMoney(commissionOf(sheetPrice)))}</td>
             </tr>
         `;
+    }).join('');
 
-    });
+    base = round2(base);
 
-    const html = `
+    printWindow.document.open();
+
+    printWindow.document.write(`
         <!DOCTYPE html>
         <html lang="ca">
         <head>
             <meta charset="UTF-8">
-
-            <title>
-                Factura ${escapeHtml(
-                    currentData.invoice_number || ''
-                )}
-            </title>
-
+            <title>Factura ${escapeHtml(currentData.invoice_number || '')}</title>
             <style>
-
-                body {
-                    font-family: Arial, Helvetica, sans-serif;
-                    padding: 30px;
-                    color: #222;
-                }
-
-                h1 {
-                    margin-bottom: 5px;
-                }
-
-                .info {
-                    margin-bottom: 25px;
-                }
-
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
-                }
-
-                th,
-                td {
-                    border: 1px solid #999;
-                    padding: 10px;
-                    text-align: left;
-                }
-
-                th {
-                    background: #eee;
-                }
-
-                .right {
-                    text-align: right;
-                }
-
+                body { font-family: Arial, Helvetica, sans-serif; padding: 30px; color: #222; }
+                h1 { margin-bottom: 5px; }
+                .info { margin-bottom: 25px; }
+                table { width: 100%; border-collapse: collapse; }
+                th, td { border: 1px solid #999; padding: 8px 10px; text-align: left; }
+                th { background: #eee; }
+                .right { text-align: right; white-space: nowrap; }
+                tfoot td { font-weight: bold; }
             </style>
-
         </head>
-
         <body>
-
-            <h1>
-                📄 Factura
-                ${escapeHtml(
-                    currentData.invoice_number || ''
-                )}
-            </h1>
-
+            <h1>Factura ${escapeHtml(currentData.invoice_number || '')}</h1>
             <div class="info">
-
-                <strong>Data:</strong>
-                ${escapeHtml(
-                    currentData.invoice_date || ''
-                )}
-
-                &nbsp;&nbsp;&nbsp;
-
-                <strong>Total:</strong>
-                ${escapeHtml(
-                    currentData.total || ''
-                )}
-
+                <strong>Data:</strong> ${escapeHtml(currentData.invoice_date || '')}
+                &nbsp;&nbsp;
+                <strong>Veterinari:</strong> ${escapeHtml(selectedPerson)}
+                &nbsp;&nbsp;
+                <strong>Mes:</strong> ${escapeHtml(selectedMonthLabel())}
             </div>
-
             <table>
-
                 <thead>
                     <tr>
-                        <th>DATA</th>
-                        <th>PACIENT</th>
-                        <th>ARTICLE</th>
-                        <th>PREU S/IVA</th>
-                        <th>IMPORT</th>
+                        <th>DATA</th><th>PACIENT</th><th>ARTICLE</th>
+                        <th>PREU S/IVA</th><th>5%</th>
                     </tr>
                 </thead>
-
-                <tbody>
-                    ${rowsHtml}
-                </tbody>
-
+                <tbody>${rowsHtml}</tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="3">Total</td>
+                        <td class="right">${escapeHtml(formatMoney(base))}</td>
+                        <td class="right">${escapeHtml(formatMoney(commissionOf(base)))}</td>
+                    </tr>
+                </tfoot>
             </table>
-
         </body>
         </html>
-    `;
-
-    printWindow.document.open();
-
-    printWindow.document.write(html);
+    `);
 
     printWindow.document.close();
-
     printWindow.focus();
 
-    setTimeout(function () {
-
-        printWindow.print();
-
-    }, 300);
+    setTimeout(() => printWindow.print(), 300);
 }
 
 
@@ -1914,188 +1661,109 @@ function printSelected() {
    FORMAT DINERS
    ========================================================= */
 
-function formatMoney(value) {
+/*
+ * "1.234,56 €", "155,81" o un número -> número. null si no
+ * és un import.
+ */
+function parseAmount(value) {
 
-    if (
-        value === null ||
-        value === undefined ||
-        value === ''
-    ) {
-        return '';
+    if (value === null || value === undefined || value === '') {
+        return null;
     }
 
-    /*
-     * Si ja és número.
-     */
     if (typeof value === 'number') {
-
-        return value.toLocaleString(
-            'ca-ES',
-            {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            }
-        ) + ' €';
+        return Number.isFinite(value) ? value : null;
     }
 
-    let text =
-        String(value)
-            .replace(/\u00A0/g, ' ')
-            .replace(/€/g, '')
-            .trim();
+    let text = String(value)
+        .replace(/ /g, ' ')
+        .replace(/€/g, '')
+        .trim();
+
+    if (text.includes(',') && text.includes('.')) {
+        text = text.replace(/\./g, '').replace(',', '.');
+    } else if (text.includes(',')) {
+        text = text.replace(',', '.');
+    }
+
+    text = text.replace(/[^0-9.-]/g, '');
 
     if (!text) {
-        return '';
+        return null;
     }
 
-    /*
-     * Format europeu:
-     * 155,81
-     * 1.234,56
-     */
-    if (
-        text.includes(',') &&
-        text.includes('.')
-    ) {
+    const number = Number(text);
 
-        text =
-            text
-                .replace(/\./g, '')
-                .replace(',', '.');
-
-    } else if (text.includes(',')) {
-
-        text =
-            text.replace(',', '.');
-    }
-
-    const number =
-        Number(
-            text.replace(
-                /[^0-9.-]/g,
-                ''
-            )
-        );
-
-    if (!Number.isFinite(number)) {
-
-        return String(value);
-    }
-
-    return number.toLocaleString(
-        'ca-ES',
-        {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        }
-    ) + ' €';
+    return Number.isFinite(number) ? number : null;
 }
 
 
-/* =========================================================
-   ESCAPE HTML
-   ========================================================= */
+function formatMoney(value) {
+
+    const number = parseAmount(value);
+
+    if (number === null) {
+        return '';
+    }
+
+    return number.toLocaleString('ca-ES', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }) + ' €';
+}
+
 
 function escapeHtml(value) {
 
-    return String(
-        value === null ||
-        value === undefined
-            ? ''
-            : value
-    )
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+    return String(value === null || value === undefined ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 
 /* =========================================================
-   ALERTES
+   ALERTES / LOADING
    ========================================================= */
+
+let alertTimer = null;
 
 function showAlert(type, message) {
 
-    const alertBox =
-        document.getElementById('alertBox');
+    const alertBox = document.getElementById('alertBox');
 
-    alertBox.className =
-        'alert ' + type;
+    alertBox.className = 'alert ' + type;
+    alertBox.textContent = message;
+    alertBox.style.display = 'block';
 
-    alertBox.textContent =
-        message;
+    clearTimeout(alertTimer);
 
-    alertBox.style.display =
-        'block';
-
-    /*
-     * Les errors duren més.
-     */
-    const timeout =
-        type === 'error'
-            ? 7000
-            : 5000;
-
-    setTimeout(function () {
-
-        alertBox.style.display =
-            'none';
-
-    }, timeout);
+    alertTimer = setTimeout(() => {
+        alertBox.style.display = 'none';
+    }, type === 'error' ? 8000 : 6000);
 }
 
-
-/* =========================================================
-   LOADING
-   ========================================================= */
 
 function showLoading(show) {
 
-    const loading =
-        document.getElementById('loadingBox');
-
-    if (show) {
-
-        loading.style.display =
-            'block';
-
-    } else {
-
-        loading.style.display =
-            'none';
-    }
+    document.getElementById('loadingBox').style.display =
+        show ? 'block' : 'none';
 }
 
-
-/* =========================================================
-   OCULTAR RESULTATS
-   ========================================================= */
 
 function hideResults() {
 
-    document.getElementById('resultsSection')
-        .classList.add('hidden');
-
+    document.getElementById('resultsSection').classList.add('hidden');
 }
 
-
-/* =========================================================
-   TECLAT / ESC
-   ========================================================= */
 
 document.addEventListener('keydown', function (e) {
 
     if (e.key === 'Escape') {
-
-        const alertBox =
-            document.getElementById('alertBox');
-
-        alertBox.style.display =
-            'none';
+        document.getElementById('alertBox').style.display = 'none';
     }
-
 });
 
 </script>
