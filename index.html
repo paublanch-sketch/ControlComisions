@@ -170,7 +170,13 @@
             color: white;
         }
 
-        .btn-success:hover {
+        .btn-success:disabled {
+            background: #cbd5e1;
+            color: #64748b;
+            opacity: 1;
+        }
+
+        .btn-success:hover:not(:disabled) {
             background: #166534;
         }
 
@@ -655,7 +661,7 @@
 
             <div class="export-grid">
                 <div>
-                    <span class="field-label">Veterinari</span>
+                    <span class="field-label">Veterinari <span id="personHint" class="badge amber">no seleccionat</span></span>
                     <div id="personPills" class="pills"></div>
                 </div>
 
@@ -696,7 +702,7 @@
             </div>
 
             <div class="actions">
-                <button id="googleSheetsBtn" class="btn btn-success" onclick="exportSelectedToGoogleSheets()">
+                <button id="googleSheetsBtn" class="btn btn-success" disabled onclick="exportSelectedToGoogleSheets()">
                     📊 Enviar a Google Sheets
                 </button>
                 <button class="btn btn-outline" onclick="exportSelectedToCSV()">
@@ -788,7 +794,8 @@ let selectedRowIndexes = new Set();
  */
 let halfOverrides = new Map();
 
-let selectedPerson = PERSONS[0];
+// Cap veterinari per defecte: s'ha de triar abans d'enviar al full.
+let selectedPerson = '';
 
 
 /* =========================================================
@@ -898,6 +905,7 @@ function renderPersonPills() {
 
         pill.addEventListener('click', function () {
             selectedPerson = person;
+            document.getElementById('personHint').classList.add('hidden');
             renderPersonPills();
             updateSelectionUI();
         });
@@ -1322,7 +1330,27 @@ function updateSelectionUI() {
         formatMoney(commissionOf(round2(base)));
 
     document.getElementById('selTarget').textContent =
-        `${selectedPerson} · ${selectedMonthLabel()}`;
+        `${selectedPerson || 'Veterinari no seleccionat'} · ${selectedMonthLabel()}`;
+
+    updateSheetsButton();
+}
+
+
+/*
+ * El botó de Google Sheets queda en gris fins que es tria un
+ * veterinari, perquè no s'enviïn línies al full d'algú per error.
+ */
+function updateSheetsButton() {
+
+    const button = document.getElementById('googleSheetsBtn');
+
+    if (button.dataset.sending === '1') {
+        return;
+    }
+
+    button.disabled = !selectedPerson;
+
+    button.title = selectedPerson ? '' : 'Tria primer un veterinari';
 }
 
 
@@ -1406,6 +1434,11 @@ async function exportSelectedToGoogleSheets() {
         return;
     }
 
+    if (!selectedPerson) {
+        showAlert('error', '❌ Tria primer un veterinari.');
+        return;
+    }
+
     const month = document.getElementById('monthSelect').value;
 
     if (!GOOGLE_APPS_SCRIPT_URL) {
@@ -1422,6 +1455,7 @@ async function exportSelectedToGoogleSheets() {
     const originalText = button.textContent;
 
     button.disabled = true;
+    button.dataset.sending = '1';
     button.textContent = '⏳ Enviant...';
 
     const payload = {
@@ -1482,8 +1516,9 @@ async function exportSelectedToGoogleSheets() {
 
     } finally {
 
-        button.disabled = false;
+        button.dataset.sending = '';
         button.textContent = originalText;
+        updateSheetsButton();
     }
 }
 
