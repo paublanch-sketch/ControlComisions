@@ -739,7 +739,7 @@
             </div>
 
             <div class="hint">
-                ÷2 s'activa sol a hospitalització 24 h, medicació i alimentació.
+                ÷2 s'activa sol amb: HOSPITALIZACION ADMINISTRACION MEDICACION, HOSPITALIZACION ALIMENTACION i HOSPITALIZACION ESTANDAR HASTA 24 HORAS.
                 Pots canviar-lo a mà fent clic al botó de la línia.
             </div>
 
@@ -927,17 +927,18 @@ function normalizeArticle(text) {
 }
 
 
+const HALF_PRICE_KEYWORDS = [
+    'HOSPITALIZACION ADMINISTRACION MEDICACION',
+    'HOSPITALIZACION ALIMENTACION',
+    'HOSPITALIZACION ESTANDAR HASTA 24 HORAS'
+];
+
+
 function isHalfPriceArticle(text) {
 
-    const t = normalizeArticle(text);
+    const t = normalizeArticle(text).toUpperCase();
 
-    const hospital24h =
-        /hospitali(z|tz)acio/.test(t) &&
-        /24\s*(h\b|hrs?\b|hores|horas)/.test(t);
-
-    return hospital24h ||
-        t.includes('medicacio') ||
-        t.includes('alimentacio');
+    return HALF_PRICE_KEYWORDS.some(keyword => t.includes(keyword));
 }
 
 

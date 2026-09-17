@@ -147,32 +147,22 @@ function doPost(e) {
   }
 }
 
-/*
- * Línies que van a la columna D dividides entre 2.
- *
- * Les factures d'AniCura arriben en castellà
- * ("HOSPITALIZACION ESTANDAR HASTA 24 HORAS GATO",
- * "HOSPITALIZACION ALIMENTACION ESTANDAR",
- * "ADMINISTRACION MEDICACIÓN"), per això es mira el castellà
- * i el català, sense accents ni majúscules.
- *
- * Ha de ser la mateixa regla que isHalfPriceArticle() de
- * index.html.
- */
+// Si la descripció conté alguna d'aquestes frases, el preu i el 5%
+// d'aquella fila es divideixen entre 2. Sense accents i en majúscules.
+const HALF_PRICE_KEYWORDS = [
+  'HOSPITALIZACION ADMINISTRACION MEDICACION',
+  'HOSPITALIZACION ALIMENTACION',
+  'HOSPITALIZACION ESTANDAR HASTA 24 HORAS'
+];
+
 function isHalfPriceArticle(text) {
   const t = String(text || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
+    .toUpperCase()
     .replace(/\s+/g, ' ');
 
-  const hospital24h =
-    /hospitali(z|tz)acio/.test(t) &&
-    /24\s*(h\b|hrs?\b|hores|horas)/.test(t);
-
-  return hospital24h ||
-    t.includes('medicacio') ||
-    t.includes('alimentacio');
+  return HALF_PRICE_KEYWORDS.some(keyword => t.includes(keyword));
 }
 
 function validateMonth(month) {
