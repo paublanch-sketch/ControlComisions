@@ -872,46 +872,100 @@ def row_money_values(line):
     return values
 
 
-def resolve_price_and_amount(monies, column_price, column_amount):
+VAT_RATES = (0.21, 0.10, 0.04, 0.07, 0.03, 0.0)
+
+
+def parse_quantity(text):
+    """
+    "2", "1 pc", "1,00" -> 2.0, 1.0, 1.0. Si no hi ha número, 1.
+    """
+
+    match = re.search(r"\d+(?:[.,]\d+)?", text or "")
+
+    if not match:
+        return 1.0
+
+    value = float(match.group(0).replace(",", "."))
+
+    return value if value > 0 else 1.0
+
+
+def price_matches(price, amount, quantity):
+    """
+    Comprova que el preu sense IVA quadra amb l'import final de la
+    línia: preu x quantitat x (1 + IVA) = import.
+    """
+
+    if price is None or amount is None:
+        return False
+
+    for quantity_option in {quantity, 1.0}:
+
+        base = price * quantity_option
+
+        for rate in VAT_RATES:
+
+            if abs(base * (1 + rate) - amount) <= 0.03 + amount * 0.0005:
+                return True
+
+    return False
+
+
+def resolve_price_and_amount(monies, column_price, column_amount,
+                             column_quantity=""):
     """
     Decideix quin import és el PREU SENSE IVA i quin és l'import
     final de la línia.
 
-    No ens refiem només de la posició de les columnes: segons com
-    surti l'OCR, el preu pot caure dins la columna del costat i
-    llavors s'exportava el preu AMB IVA, que és el que inflava la
-    comissió del 5%.
+    El preu és la columna "Precio excl.IVA/IGIC": la primera xifra
+    de la fila, després de la data i l'article. L'import (la última
+    xifra, amb IVA) NO és mai el preu: abans, quan el preu no es
+    trobava, s'agafava l'import i la comissió del 5% sortia inflada.
 
-    A la factura cada línia compleix sempre:
+    Ordre:
+      1. La columna del preu, si no és el mateix número que l'import.
+      2. Si l'OCR ha mogut el preu de columna: la primera xifra de la
+         fila que no sigui l'import.
+      3. Res: el preu es queda buit i la línia es marca per revisar.
 
-        preu sense IVA + import d'IVA = import final
-
-    Aquesta igualtat identifica el preu sense error possible.
+    Retorna (preu, import, revisar). "revisar" és True quan el preu no
+    quadra amb l'import (preu x quantitat x (1 + IVA) = import), per
+    avisar a la pantalla.
     """
 
-    if len(monies) >= 3:
+    amount_text = column_amount or (monies[-1][0] if monies else "")
+    amount = money_to_float(amount_text)
 
-        total_text, total = monies[-1]
+    # Totes les xifres de la fila menys l'import final (i qualsevol
+    # altra còpia del mateix número, que seria l'import repetit).
+    others = [
+        (text, value)
+        for text, value in monies
+        if text != amount_text and value != amount
+    ]
 
-        for index in range(len(monies) - 2):
+    quantity = parse_quantity(column_quantity)
 
-            base_text, base = monies[index]
+    price_text = ""
 
-            for other_text, other in monies[index + 1:-1]:
+    if column_price and column_price != amount_text:
+        price_text = column_price
 
-                if abs(base + other - total) <= 0.02:
-                    return base_text, total_text
+    elif others:
+        price_text = others[0][0]
 
-    if len(monies) == 2:
+    if not price_text:
+        return "", amount_text, True
 
-        first_text, first = monies[0]
-        second_text, second = monies[1]
+    check = not price_matches(money_to_float(price_text), amount, quantity)
 
-        if first < second:
-            return first_text, second_text
+    # Si la columna no quadra però la primera xifra de la fila sí, és
+    # que l'OCR ha mogut el preu de lloc.
+    if check and others and others[0][0] != price_text:
+        if price_matches(others[0][1], amount, quantity):
+            return others[0][0], amount_text, False
 
-    # Sense manera de comprovar-ho: ens quedem amb les columnes.
-    return column_price, column_amount
+    return price_text, amount_text, check
 
 
 def parse_money(text):
@@ -1005,6 +1059,8 @@ def extract_items_from_words(words, patients=None):
                 "patient": patient_cell,
                 "article": clean_article(cells.get("article", "")),
                 "price": parse_money(cells.get("price", "")),
+                "quantity": cells.get("quantity", ""),
+                "raw": text,
                 "amount": parse_money(amount_cell),
                 "monies": row_money_values(line),
                 "prefix": [],
@@ -1076,15 +1132,15 @@ def extract_items_from_words(words, patients=None):
         if not article:
             continue
 
-        price, amount = resolve_price_and_amount(
+        price, amount, check = resolve_price_and_amount(
             row["monies"],
             row["price"],
-            row["amount"]
+            row["amount"],
+            row["quantity"]
         )
 
-        if not price:
-            price = amount
-
+        # Si no hi ha preu, la línia surt igualment amb el preu buit
+        # perquè s'escrigui a mà. Mai es posa l'import en el seu lloc.
         if not amount and not price:
             continue
 
@@ -1098,7 +1154,14 @@ def extract_items_from_words(words, patients=None):
             "price": price,
 
             # Import final de la línia, amb IVA.
-            "amount": amount
+            "amount": amount,
+
+            # El preu no quadra amb l'import: cal mirar-lo.
+            "check": check,
+
+            # La línia tal com es llegeix al PDF, per poder buscar-hi
+            # el preu a mà quan no s'ha trobat.
+            "raw": row["raw"] if check else ""
         })
 
     return items

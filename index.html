@@ -538,6 +538,82 @@
             margin-top: 10px;
         }
 
+        .invoice-row td {
+            background: var(--blue-soft);
+            border-top: 2px solid var(--blue-line);
+            padding: 10px 12px;
+        }
+
+        .invoice-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 14px;
+        }
+
+        .invoice-name {
+            font-weight: 700;
+            color: var(--blue);
+            text-decoration: none;
+            overflow-wrap: anywhere;
+        }
+
+        .invoice-name:hover {
+            text-decoration: underline;
+        }
+
+        .invoice-info {
+            color: var(--muted, #6b7280);
+            font-size: 13px;
+        }
+
+        .invoice-remove {
+            margin-left: auto;
+        }
+
+        tr.to-check td {
+            background: var(--amber-soft);
+        }
+
+        .price-input {
+            width: 92px;
+            padding: 5px 7px;
+            border: 2px solid var(--amber-line);
+            border-radius: 6px;
+            background: #fffbe9;
+            font: inherit;
+            text-align: right;
+        }
+
+        .check-note {
+            font-size: 11px;
+            color: var(--amber);
+            font-weight: 600;
+            margin-top: 2px;
+        }
+
+        .raw-line {
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--amber);
+            font-family: ui-monospace, Consolas, monospace;
+            overflow-wrap: anywhere;
+        }
+
+        .raw-label {
+            font-family: inherit;
+            font-weight: 700;
+        }
+
+        .raw-line a {
+            margin-left: 6px;
+            color: var(--blue);
+        }
+
+        .error-text {
+            color: #b42318;
+        }
+
         .hidden {
             display: none !important;
         }
@@ -598,19 +674,19 @@
     <div class="card upload-card">
         <div id="uploadArea" class="upload-area">
             <div class="upload-icon">📄</div>
-            <h2>Selecciona una factura PDF</h2>
-            <p class="text-muted">Fes clic aquí o arrossega el PDF</p>
+            <h2>Selecciona les factures PDF</h2>
+            <p class="text-muted">Fes clic aquí o arrossega els PDF (se'n poden pujar uns quants de cop)</p>
             <button type="button" class="btn btn-primary" id="pickBtn">
                 📂 Seleccionar PDF
             </button>
-            <input id="fileInput" type="file" accept="application/pdf,.pdf">
+            <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple>
         </div>
     </div>
 
     <!-- LOADING -->
     <div id="loadingBox" class="card loading">
         <div class="spinner"></div>
-        <strong>Processant factura...</strong>
+        <strong id="loadingTitle">Processant factura...</strong>
         <div class="text-muted">Extracció de text i OCR en curs</div>
     </div>
 
@@ -618,7 +694,7 @@
     <div id="resultsSection" class="hidden">
 
         <div class="card">
-            <p class="eyebrow">Factura llegida</p>
+            <p class="eyebrow" id="invoicesEyebrow">Factura llegida</p>
 
             <div class="stat-grid">
 
@@ -718,7 +794,7 @@
         <div class="card">
 
             <div class="table-head">
-                <h2>Línies de la factura</h2>
+                <h2>Línies que es posaran</h2>
                 <div class="pills">
                     <button class="btn btn-outline btn-sm" onclick="selectAllRows()">☑️ Totes</button>
                     <button class="btn btn-outline btn-sm" onclick="deselectAllRows()">⬜ Cap</button>
@@ -783,6 +859,13 @@ const MONTHS = [
     'Juliol', 'Agost', 'Setembre', 'Octubre', 'Novembre', 'Desembre'
 ];
 
+/*
+ * Factures pujades, en l'ordre en què es veuen:
+ * { id, name (nom del PDF), loading, error, data }.
+ */
+let invoices = [];
+
+// Totes les línies de totes les factures, una llista plana.
 let currentData = null;
 
 let selectedRowIndexes = new Set();
@@ -985,7 +1068,7 @@ function setupFileInput() {
             return;
         }
 
-        uploadFile(this.files[0]);
+        uploadFiles(Array.from(this.files));
 
         // Permet tornar a pujar el mateix fitxer.
         this.value = '';
@@ -1015,7 +1098,7 @@ function setupDragAndDrop() {
         const files = e.dataTransfer.files;
 
         if (files && files.length) {
-            uploadFile(files[0]);
+            uploadFiles(Array.from(files));
         }
     });
 }
@@ -1023,82 +1106,189 @@ function setupDragAndDrop() {
 
 /* =========================================================
    PUJADA
-   ========================================================= */
+   =========================================================
 
-function uploadFile(file) {
+   Es poden pujar uns quants PDF de cop. Cada factura queda a la
+   llista, una sota l'altra, amb el nom del PDF i les seves línies.
+   Totes les línies de totes les factures es poden seleccionar i
+   enviar al full juntes.
+*/
 
-    if (!file) {
+let nextItemId = 1;
+let nextInvoiceId = 1;
+
+async function uploadFiles(files) {
+
+    const pdfs = files.filter(file =>
+        file.type === 'application/pdf' ||
+        file.name.toLowerCase().endsWith('.pdf')
+    );
+
+    if (pdfs.length < files.length) {
+        showAlert('error', '❌ Només es poden pujar PDF: els altres fitxers no s’han llegit.');
+    }
+
+    if (!pdfs.length) {
         return;
     }
 
-    if (
-        file.type !== 'application/pdf' &&
-        !file.name.toLowerCase().endsWith('.pdf')
-    ) {
-        showAlert('error', '❌ El fitxer seleccionat no és un PDF.');
-        return;
+    const pending = pdfs.map(file => {
+        const invoice = {
+            id: nextInvoiceId++,
+            name: file.name,
+            // Per obrir el PDF al costat quan cal buscar-hi un preu.
+            url: URL.createObjectURL(file),
+            loading: true,
+            data: null,
+            error: ''
+        };
+        invoices.push(invoice);
+        return { file, invoice };
+    });
+
+    rebuildItems();
+    displayResults();
+
+    let done = 0;
+    let failed = 0;
+
+    // D'una en una: el servidor de Render és petit i l'OCR va just.
+    for (const { file, invoice } of pending) {
+
+        document.getElementById('loadingTitle').textContent =
+            pending.length > 1
+                ? `Processant ${file.name} (${done + 1} de ${pending.length})...`
+                : `Processant ${file.name}...`;
+
+        showLoading(true);
+
+        try {
+            invoice.data = await readInvoice(file);
+        } catch (error) {
+            console.error(error);
+            invoice.error = error.message || 'No s’ha pogut processar el PDF.';
+            failed++;
+        }
+
+        invoice.loading = false;
+        done++;
+
+        rebuildItems();
+        displayResults();
     }
+
+    showLoading(false);
+
+    if (failed) {
+        showAlert('error', `❌ ${failed} de ${pending.length} PDF no s’han pogut llegir. Mira el missatge a la llista.`);
+    } else {
+        showAlert('success', pending.length > 1
+            ? `✅ ${pending.length} factures processades`
+            : '✅ Factura processada correctament');
+    }
+}
+
+
+async function readInvoice(file) {
 
     const formData = new FormData();
 
     formData.append('file', file);
 
-    showLoading(true);
-
-    hideResults();
-
-    fetch('/upload', {
+    const response = await fetch('/upload', {
         method: 'POST',
         body: formData
-    })
-
-    .then(async response => {
-
-        let data;
-
-        try {
-            data = await response.json();
-        } catch (error) {
-            throw new Error('El servidor ha retornat una resposta no vàlida.');
-        }
-
-        if (!response.ok || !data.success) {
-            throw new Error(data.error || 'No s’ha pogut processar el PDF.');
-        }
-
-        return data;
-    })
-
-    .then(data => {
-
-        currentData = data;
-
-        if (!Array.isArray(currentData.items)) {
-            currentData.items = [];
-        }
-
-        selectedRowIndexes.clear();
-
-        halfOverrides.clear();
-
-        displayResults(data);
-
-        showAlert('success', '✅ Factura processada correctament');
-    })
-
-    .catch(error => {
-
-        console.error(error);
-
-        showAlert(
-            'error',
-            '❌ ' + (error.message || 'No s’ha pogut processar el PDF.')
-        );
-    })
-
-    .finally(() => {
-        showLoading(false);
     });
+
+    let data;
+
+    try {
+        data = await response.json();
+    } catch (error) {
+        throw new Error('El servidor ha retornat una resposta no vàlida.');
+    }
+
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'No s’ha pogut processar el PDF.');
+    }
+
+    if (!Array.isArray(data.items)) {
+        data.items = [];
+    }
+
+    data.items.forEach(item => {
+        item._id = nextItemId++;
+    });
+
+    return data;
+}
+
+
+/*
+ * Llista plana de totes les línies de totes les factures, en
+ * l'ordre en què es veuen. La selecció i el ÷2 fet a mà van per
+ * línia (_id), així no es perden en afegir o treure una factura.
+ */
+function rebuildItems() {
+
+    const selectedIds = new Set(
+        Array.from(selectedRowIndexes)
+            .map(index => currentData && currentData.items[index])
+            .filter(Boolean)
+            .map(item => item._id)
+    );
+
+    const overrides = new Map();
+
+    halfOverrides.forEach((value, index) => {
+        const item = currentData && currentData.items[index];
+        if (item) {
+            overrides.set(item._id, value);
+        }
+    });
+
+    const items = [];
+
+    invoices.forEach(invoice => {
+
+        if (!invoice.data) {
+            return;
+        }
+
+        invoice.data.items.forEach(item => {
+            item._invoice = invoice;
+            items.push(item);
+        });
+    });
+
+    currentData = { items };
+
+    selectedRowIndexes = new Set();
+    halfOverrides = new Map();
+
+    items.forEach((item, index) => {
+        if (selectedIds.has(item._id)) {
+            selectedRowIndexes.add(index);
+        }
+        if (overrides.has(item._id)) {
+            halfOverrides.set(index, overrides.get(item._id));
+        }
+    });
+}
+
+
+function removeInvoice(id) {
+
+    const removed = invoices.find(invoice => invoice.id === id);
+
+    if (removed && removed.url) {
+        URL.revokeObjectURL(removed.url);
+    }
+
+    invoices = invoices.filter(invoice => invoice.id !== id);
+
+    rebuildItems();
+    displayResults();
 }
 
 
@@ -1106,20 +1296,48 @@ function uploadFile(file) {
    MOSTRAR RESULTATS
    ========================================================= */
 
-function displayResults(data) {
+function displayResults() {
 
-    document.getElementById('resultsSection').classList.remove('hidden');
+    const section = document.getElementById('resultsSection');
+
+    if (!invoices.length) {
+        section.classList.add('hidden');
+        return;
+    }
+
+    section.classList.remove('hidden');
+
+    const read = invoices.filter(invoice => invoice.data);
+
+    document.getElementById('invoicesEyebrow').textContent =
+        read.length > 1 ? `${read.length} factures llegides` : 'Factura llegida';
 
     document.getElementById('invoiceNumber').textContent =
-        data.invoice_number || '-';
+        read.length === 1
+            ? (read[0].data.invoice_number || '-')
+            : (read.length ? `${read.length} factures` : '-');
+
+    const dates = [...new Set(read.map(invoice => invoice.data.invoice_date).filter(Boolean))];
 
     document.getElementById('invoiceDate').textContent =
-        data.invoice_date || '-';
+        dates.length ? dates.join(' · ') : '-';
+
+    const totals = read
+        .map(invoice => parseAmount(invoice.data.total))
+        .filter(value => value !== null);
 
     document.getElementById('invoiceTotal').textContent =
-        data.total ? formatMoney(data.total) : '-';
+        totals.length ? formatMoney(round2(totals.reduce((a, b) => a + b, 0))) : '-';
 
-    const patients = Array.isArray(data.patients) ? data.patients : [];
+    const patients = [];
+
+    read.forEach(invoice => {
+        (invoice.data.patients || []).forEach(patient => {
+            if (patient && !patients.includes(patient)) {
+                patients.push(patient);
+            }
+        });
+    });
 
     document.getElementById('patientCount').textContent = patients.length;
 
@@ -1151,84 +1369,179 @@ function renderPatients(patients) {
 
 /* =========================================================
    TAULA
-   ========================================================= */
+   =========================================================
+
+   Una factura sota l'altra: primer una fila amb el nom del PDF
+   i, a sota, les línies que es posaran al full.
+*/
 
 function renderTable() {
 
     const tbody = document.getElementById('invoiceTableBody');
 
-    const items = currentData ? currentData.items : [];
-
     tbody.innerHTML = '';
 
-    if (!items.length) {
-
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="9" class="empty-state">
-                    No s’han detectat línies de factura.
-                </td>
-            </tr>
-        `;
-
+    if (!invoices.length) {
         return;
     }
 
-    items.forEach((item, index) => {
+    let index = 0;
 
-        const tr = document.createElement('tr');
+    invoices.forEach(invoice => {
 
-        const selected = selectedRowIndexes.has(index);
-        const halved = isRowHalved(index);
+        const head = document.createElement('tr');
 
-        const price = parseAmount(item.price || item.amount);
-        const sheetPrice = sheetPriceFor(index);
+        head.className = 'invoice-row';
 
-        if (selected) {
-            tr.classList.add('selected');
-        }
+        const info = invoice.data
+            ? [
+                invoice.data.invoice_number ? `Factura ${escapeHtml(invoice.data.invoice_number)}` : '',
+                invoice.data.invoice_date ? escapeHtml(invoice.data.invoice_date) : '',
+                invoice.data.total ? `Total ${escapeHtml(formatMoney(invoice.data.total))}` : '',
+                `${invoice.data.items.length} línies`
+            ].filter(Boolean).join(' · ')
+            : '';
 
-        tr.innerHTML = `
-            <td class="check">
-                <input type="checkbox" ${selected ? 'checked' : ''}>
+        head.innerHTML = `
+            <td colspan="9">
+                <div class="invoice-head">
+                    <a class="invoice-name" href="${invoice.url}" target="_blank" rel="noopener" title="Obrir el PDF">📄 ${escapeHtml(invoice.name)}</a>
+                    <span class="invoice-info">${info}</span>
+                    <button type="button" class="btn btn-outline btn-sm invoice-remove" title="Treure aquesta factura">✕ Treure</button>
+                </div>
             </td>
-            <td class="date">${escapeHtml(item.date || '')}</td>
-            <td>${escapeHtml(item.patient || '')}</td>
-            <td class="article-cell">${escapeHtml(item.article || '')}</td>
-            <td class="num">${escapeHtml(formatMoney(price))}</td>
-            <td class="num">
-                <button type="button" class="half-toggle ${halved ? 'on' : ''}"
-                        title="Dividir el preu entre 2">
-                    ${halved ? '÷2' : 'no'}
-                </button>
-            </td>
-            <td class="num amount">${escapeHtml(formatMoney(sheetPrice))}</td>
-            <td class="num commission">${escapeHtml(formatMoney(commissionOf(sheetPrice)))}</td>
-            <td class="num text-muted">${escapeHtml(formatMoney(item.amount))}</td>
         `;
 
-        tr.querySelector('input').addEventListener('change', function () {
-            setRowSelected(index, this.checked);
+        head.querySelector('.invoice-remove').addEventListener('click', function () {
+            removeInvoice(invoice.id);
         });
 
-        tr.querySelector('.half-toggle').addEventListener('click', function (e) {
-            e.stopPropagation();
-            halfOverrides.set(index, !isRowHalved(index));
+        tbody.appendChild(head);
+
+        if (invoice.loading) {
+            tbody.insertAdjacentHTML('beforeend', `
+                <tr><td colspan="9" class="empty-state">⏳ Processant…</td></tr>
+            `);
+            return;
+        }
+
+        if (invoice.error) {
+            tbody.insertAdjacentHTML('beforeend', `
+                <tr><td colspan="9" class="empty-state error-text">❌ ${escapeHtml(invoice.error)}</td></tr>
+            `);
+            return;
+        }
+
+        if (!invoice.data.items.length) {
+            tbody.insertAdjacentHTML('beforeend', `
+                <tr><td colspan="9" class="empty-state">No s’han detectat línies en aquesta factura.</td></tr>
+            `);
+            return;
+        }
+
+        invoice.data.items.forEach(item => {
+            tbody.appendChild(renderRow(item, index));
+            index++;
+        });
+    });
+}
+
+
+function renderRow(item, index) {
+
+    const tr = document.createElement('tr');
+
+    tr.dataset.index = index;
+
+    const selected = selectedRowIndexes.has(index);
+    const halved = isRowHalved(index);
+
+    // El preu és SEMPRE el preu sense IVA. Si no s'ha trobat, es
+    // deixa en blanc per escriure'l: mai es posa l'import.
+    const price = parseAmount(item.price);
+    const sheetPrice = sheetPriceFor(index);
+
+    const needsInput = price === null || item.check;
+
+    if (selected) {
+        tr.classList.add('selected');
+    }
+
+    if (needsInput) {
+        tr.classList.add('to-check');
+    }
+
+    const priceCell = needsInput
+        ? `<input type="text" class="price-input" inputmode="decimal"
+                  value="${escapeHtml(price === null ? '' : String(item.price))}"
+                  placeholder="preu s/IVA"
+                  title="${price === null
+                      ? 'No s’ha trobat el preu sense IVA: escriu-lo'
+                      : 'El preu no quadra amb l’import: comprova’l a la factura'}">
+           <div class="check-note">⚠ revisa</div>`
+        : escapeHtml(formatMoney(price));
+
+    tr.innerHTML = `
+        <td class="check">
+            <input type="checkbox" class="row-check" ${selected ? 'checked' : ''}>
+        </td>
+        <td class="date">${escapeHtml(item.date || '')}</td>
+        <td>${escapeHtml(item.patient || '')}</td>
+        <td class="article-cell">${escapeHtml(item.article || '')}${needsInput ? `
+            <div class="raw-line">
+                <span class="raw-label">Al PDF:</span> ${escapeHtml(item.raw || '(no s’ha pogut llegir la línia)')}
+                ${item._invoice && item._invoice.url ? `<a href="${item._invoice.url}" target="_blank" rel="noopener">obrir el PDF</a>` : ''}
+            </div>` : ''}</td>
+        <td class="num">${priceCell}</td>
+        <td class="num">
+            <button type="button" class="half-toggle ${halved ? 'on' : ''}"
+                    title="Dividir el preu entre 2">
+                ${halved ? '÷2' : 'no'}
+            </button>
+        </td>
+        <td class="num amount">${escapeHtml(formatMoney(sheetPrice))}</td>
+        <td class="num commission">${escapeHtml(formatMoney(commissionOf(sheetPrice)))}</td>
+        <td class="num text-muted">${escapeHtml(formatMoney(item.amount))}</td>
+    `;
+
+    tr.querySelector('.row-check').addEventListener('change', function () {
+        setRowSelected(index, this.checked);
+    });
+
+    tr.querySelector('.half-toggle').addEventListener('click', function (e) {
+        e.stopPropagation();
+        halfOverrides.set(index, !isRowHalved(index));
+        renderTable();
+        updateSelectionUI();
+    });
+
+    const priceInput = tr.querySelector('.price-input');
+
+    if (priceInput) {
+
+        priceInput.addEventListener('click', e => e.stopPropagation());
+
+        priceInput.addEventListener('change', function () {
+            const value = parseAmount(this.value);
+            item.price = value === null ? '' : value.toFixed(2).replace('.', ',');
+            item.check = value === null;
             renderTable();
             updateSelectionUI();
         });
+    }
 
-        tr.addEventListener('click', function (e) {
+    tr.addEventListener('click', function (e) {
 
-            if (e.target.tagName.toLowerCase() === 'input') {
-                return;
-            }
+        const tag = e.target.tagName.toLowerCase();
 
-            setRowSelected(index, !selectedRowIndexes.has(index));
-        });
+        if (tag === 'input' || tag === 'button') {
+            return;
+        }
 
-        tbody.appendChild(tr);
+        setRowSelected(index, !selectedRowIndexes.has(index));
     });
+
+    return tr;
 }
 
 
@@ -1244,7 +1557,8 @@ function sheetPriceFor(index) {
 
     const item = currentData.items[index];
 
-    const price = parseAmount(item.price || item.amount);
+    // Mai l'import: si no hi ha preu sense IVA, no hi ha preu.
+    const price = parseAmount(item.price);
 
     if (price === null) {
         return null;
@@ -1279,7 +1593,7 @@ function setRowSelected(index, selected) {
     }
 
     const row = document.getElementById('invoiceTableBody')
-        .querySelectorAll('tr')[index];
+        .querySelector(`tr[data-index="${index}"]`);
 
     if (row) {
         row.classList.toggle('selected', selected);
@@ -1398,7 +1712,54 @@ function checkCanExport() {
         return false;
     }
 
+    const withoutPrice = getSelectedIndexes()
+        .filter(index => parseAmount(currentData.items[index].price) === null);
+
+    if (withoutPrice.length) {
+        showAlert(
+            'error',
+            `❌ Falta el preu sense IVA a ${withoutPrice.length} línia(es) seleccionades: escriu-lo a la casella groga.`
+        );
+        return false;
+    }
+
     return true;
+}
+
+
+/*
+ * Les factures d'on surten les línies seleccionades, juntes, per a
+ * la nota del full i els noms dels fitxers.
+ */
+function selectedInvoicesSummary() {
+
+    const chosen = [];
+
+    getSelectedIndexes().forEach(index => {
+        const invoice = currentData.items[index]._invoice;
+        if (invoice && !chosen.includes(invoice)) {
+            chosen.push(invoice);
+        }
+    });
+
+    const join = values => [...new Set(values.filter(Boolean))].join(', ');
+
+    const patients = [];
+
+    chosen.forEach(invoice => {
+        (invoice.data.patients || []).forEach(patient => {
+            if (!patients.includes(patient)) {
+                patients.push(patient);
+            }
+        });
+    });
+
+    return {
+        invoice_number: join(chosen.map(invoice => invoice.data.invoice_number)),
+        invoice_date: join(chosen.map(invoice => invoice.data.invoice_date)),
+        total: join(chosen.map(invoice => invoice.data.total)),
+        patients: patients
+    };
 }
 
 
@@ -1420,9 +1781,9 @@ function itemToGoogleSheetRow(index) {
 
     return {
         fecha: item.date || '',
-        factura: currentData.invoice_number || '',
+        factura: (item._invoice && item._invoice.data.invoice_number) || '',
         articulo: item.article || '',
-        precio: item.price || item.amount || '',
+        precio: item.price || '',
         meitat: isRowHalved(index)
     };
 }
@@ -1461,12 +1822,7 @@ async function exportSelectedToGoogleSheets() {
     const payload = {
         person: selectedPerson,
         month: month,
-        invoice: {
-            invoice_number: currentData.invoice_number || '',
-            invoice_date: currentData.invoice_date || '',
-            total: currentData.total || '',
-            patients: currentData.patients || []
-        },
+        invoice: selectedInvoicesSummary(),
         table_rows: getSelectedIndexes().map(itemToGoogleSheetRow)
     };
 
@@ -1567,7 +1923,9 @@ function exportSelectedToCSV() {
     const link = document.createElement('a');
 
     link.href = url;
-    link.download = `${currentData.invoice_number || 'factura'}_seleccionades.csv`;
+    const numbers = selectedInvoicesSummary().invoice_number;
+
+    link.download = `${numbers && !numbers.includes(',') ? numbers : 'factures'}_seleccionades.csv`;
 
     document.body.appendChild(link);
     link.click();
@@ -1645,7 +2003,7 @@ function printSelected() {
         <html lang="ca">
         <head>
             <meta charset="UTF-8">
-            <title>Factura ${escapeHtml(currentData.invoice_number || '')}</title>
+            <title>Factura ${escapeHtml(selectedInvoicesSummary().invoice_number)}</title>
             <style>
                 body { font-family: Arial, Helvetica, sans-serif; padding: 30px; color: #222; }
                 h1 { margin-bottom: 5px; }
@@ -1658,9 +2016,9 @@ function printSelected() {
             </style>
         </head>
         <body>
-            <h1>Factura ${escapeHtml(currentData.invoice_number || '')}</h1>
+            <h1>Factura ${escapeHtml(selectedInvoicesSummary().invoice_number)}</h1>
             <div class="info">
-                <strong>Data:</strong> ${escapeHtml(currentData.invoice_date || '')}
+                <strong>Data:</strong> ${escapeHtml(selectedInvoicesSummary().invoice_date)}
                 &nbsp;&nbsp;
                 <strong>Veterinari:</strong> ${escapeHtml(selectedPerson)}
                 &nbsp;&nbsp;
