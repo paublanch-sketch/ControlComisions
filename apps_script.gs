@@ -32,16 +32,36 @@ const MONTH_NAMES = [
   'Juliol', 'Agost', 'Setembre', 'Octubre', 'Novembre', 'Desembre'
 ];
 
+// Amb mala connexió, una tanda pot arribar i perdre's la resposta, i
+// la web la torna a enviar amb el mateix batch_id. Les tandes escrites
+// es recorden 6 hores (el màxim de CacheService) i una de repetida es
+// contesta igual, sense tornar-la a escriure.
+const BATCH_CACHE_SECONDS = 6 * 60 * 60;
+
 function doGet() {
-  return ContentService
-    .createTextOutput(JSON.stringify({
-      ok: true,
-      message: 'Extractor de Factures OCR connectat'
-    }))
-    .setMimeType(ContentService.MimeType.JSON);
+  return jsonResponse({
+    ok: true,
+    message: 'Extractor de Factures OCR connectat',
+    // La web ho mira per saber si pot reenviar una tanda sense
+    // duplicar-la.
+    repeats: true
+  });
 }
 
 function doPost(e) {
+
+  // D'un en un: dos enviaments alhora triarien la mateixa fila lliure
+  // i l'un trepitjaria l'altre.
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(30000)) {
+    return jsonResponse({
+      ok: false,
+      busy: true,
+      error: 'El full està ocupat amb un altre enviament. Torna-ho a provar.'
+    });
+  }
+
   try {
     let rawContent = '';
 
@@ -71,6 +91,19 @@ function doPost(e) {
     const rows = Array.isArray(payload.table_rows) ? payload.table_rows : [];
     if (!rows.length) {
       throw new Error('No hi ha línies seleccionades per exportar.');
+    }
+
+    const batchId = String(payload.batch_id || '').trim();
+    const cache = CacheService.getScriptCache();
+    const cacheKey = batchId ? 'tanda_' + batchId : '';
+
+    if (cacheKey) {
+      const previous = cache.get(cacheKey);
+      if (previous) {
+        const repeated = JSON.parse(previous);
+        repeated.repeated = true;
+        return jsonResponse(repeated);
+      }
     }
 
     const ss = SpreadsheetApp.openById(spreadsheetId);
@@ -120,30 +153,49 @@ function doPost(e) {
 
     monthSheet.getRange(nextRow, 4, values.length, 2).setNumberFormat(MONEY_FORMAT);
 
-    const invoice = payload.invoice || {};
-    monthSheet.getRange('A1').setNote(
-      'Veterinari: ' + person +
-      '\nMes: ' + month +
-      '\nFactura(es): ' + (invoice.invoice_number || '') +
-      '\nData factura: ' + (invoice.invoice_date || '') +
-      '\nExportades en aquesta tanda: ' + values.length +
-      '\nÚltima exportació: ' + new Date().toLocaleString()
-    );
+    SpreadsheetApp.flush();
 
-    return jsonResponse({
+    const result = {
       ok: true,
+      batch_id: batchId,
       person: person,
       month: month,
       sheet_name: monthSheet.getName(),
       exported_rows: values.length,
       halved_rows: halvedRows
-    });
+    };
+
+    // Les línies ja són al full: des d'aquí, si la web torna a enviar
+    // la tanda, se li contesta això mateix.
+    if (cacheKey) {
+      cache.put(cacheKey, JSON.stringify(result), BATCH_CACHE_SECONDS);
+    }
+
+    // La nota és només informativa: si falla, les línies ja hi són i
+    // la resposta ha de dir que sí.
+    try {
+      const invoice = payload.invoice || {};
+      monthSheet.getRange('A1').setNote(
+        'Veterinari: ' + person +
+        '\nMes: ' + month +
+        '\nFactura(es): ' + (invoice.invoice_number || '') +
+        '\nData factura: ' + (invoice.invoice_date || '') +
+        '\nExportades en aquesta tanda: ' + values.length +
+        '\nÚltima exportació: ' + new Date().toLocaleString()
+      );
+    } catch (noteError) {
+      console.error(noteError);
+    }
+
+    return jsonResponse(result);
 
   } catch (err) {
     return jsonResponse({
       ok: false,
       error: String(err && err.message ? err.message : err)
     });
+  } finally {
+    lock.releaseLock();
   }
 }
 

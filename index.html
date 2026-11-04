@@ -597,11 +597,8 @@
             text-align: right;
         }
 
-        .check-note {
-            font-size: 11px;
-            color: var(--amber);
-            font-weight: 600;
-            margin-top: 2px;
+        .invoice-retry {
+            margin-left: 10px;
         }
 
         .raw-line {
@@ -699,7 +696,7 @@
     <div id="loadingBox" class="card loading">
         <div class="spinner"></div>
         <strong id="loadingTitle">Processant factura...</strong>
-        <div class="text-muted">Extracció de text i OCR en curs</div>
+        <div class="text-muted" id="loadingDetail">Extracció de text i OCR en curs</div>
     </div>
 
     <!-- RESULTATS -->
@@ -1124,12 +1121,51 @@ function setupDragAndDrop() {
    llista, una sota l'altra, amb el nom del PDF i les seves línies.
    Totes les línies de totes les factures es poden seleccionar i
    enviar al full juntes.
+
+   Amb mala connexió la pujada es pot tallar a mitges, i el servidor
+   de Render triga un minut a despertar-se si ningú l'ha fet servir.
+   Cada factura es torna a provar sola unes quantes vegades, la
+   pantalla diu en tot moment què està passant i, si tot falla, la
+   factura es queda a la llista amb un botó per tornar-ho a provar
+   sense haver de triar el PDF.
 */
 
 let nextItemId = 1;
 let nextInvoiceId = 1;
 
-async function uploadFiles(files) {
+// El mateix límit que el servidor (MAX_FILE_SIZE a app.py): un PDF
+// més gran no es puja, que amb mala connexió seria temps perdut.
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+// Segons d'espera abans de cada nou intent de pujada.
+const UPLOAD_RETRY_WAITS = [3, 8, 15, 30, 45, 60];
+
+// Sense avançar ni un byte en aquest temps, la pujada s'ha penjat:
+// es talla i es torna a provar.
+const UPLOAD_STALL_MS = 90 * 1000;
+
+// Un cop pujat el PDF, l'OCR pot trigar fins a 4 minuts (el gunicorn
+// de Render talla als 240 s), i un minut més si el servidor s'estava
+// despertant.
+const PROCESSING_TIMEOUT_MS = 6 * 60 * 1000;
+
+// D'una en una, també les que es tornen a provar a mà: el servidor
+// de Render és petit i l'OCR va just.
+let uploadChain = Promise.resolve();
+
+// Pujades i enviaments en marxa. Si n'hi ha, el navegador avisa
+// abans de tancar o recarregar la pàgina, que es perdrien.
+let busyCount = 0;
+
+window.addEventListener('beforeunload', function (e) {
+
+    if (busyCount > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
+
+function uploadFiles(files) {
 
     const pdfs = files.filter(file =>
         file.type === 'application/pdf' ||
@@ -1144,10 +1180,12 @@ async function uploadFiles(files) {
         return;
     }
 
-    const pending = pdfs.map(file => {
+    const added = pdfs.map(file => {
         const invoice = {
             id: nextInvoiceId++,
             name: file.name,
+            // Es guarda per tornar-lo a pujar si la connexió falla.
+            file: file,
             // Per obrir el PDF al costat quan cal buscar-hi un preu.
             url: URL.createObjectURL(file),
             loading: true,
@@ -1155,84 +1193,377 @@ async function uploadFiles(files) {
             error: ''
         };
         invoices.push(invoice);
-        return { file, invoice };
+        return invoice;
+    });
+
+    queueUploads(added);
+}
+
+
+// El botó «Torna-ho a provar» d'una factura que no s'ha pogut llegir.
+function retryInvoice(id) {
+
+    const invoice = invoices.find(invoice => invoice.id === id);
+
+    if (invoice && invoice.file && !invoice.loading) {
+        queueUploads([invoice]);
+    }
+}
+
+
+function queueUploads(list) {
+
+    list.forEach(invoice => {
+        invoice.loading = true;
+        invoice.error = '';
     });
 
     rebuildItems();
     displayResults();
 
+    uploadChain = uploadChain
+        .then(() => processUploads(list))
+        .catch(error => console.error(error));
+}
+
+
+async function processUploads(list) {
+
     let done = 0;
     let failed = 0;
 
-    // D'una en una: el servidor de Render és petit i l'OCR va just.
-    for (const { file, invoice } of pending) {
+    busyCount++;
 
-        document.getElementById('loadingTitle').textContent =
-            pending.length > 1
-                ? `Processant ${file.name} (${done + 1} de ${pending.length})...`
-                : `Processant ${file.name}...`;
+    try {
 
-        showLoading(true);
+        for (const invoice of list) {
 
-        try {
-            invoice.data = await readInvoice(file);
-        } catch (error) {
-            console.error(error);
-            invoice.error = error.message || 'No s’ha pogut processar el PDF.';
-            failed++;
+            // L'han treta de la llista mentre esperava el seu torn.
+            if (!invoices.includes(invoice)) {
+                continue;
+            }
+
+            document.getElementById('loadingTitle').textContent =
+                list.length > 1
+                    ? `Processant ${invoice.name} (${done + failed + 1} de ${list.length})...`
+                    : `Processant ${invoice.name}...`;
+
+            showLoading(true);
+
+            try {
+                invoice.data = await readInvoice(invoice);
+                done++;
+            } catch (error) {
+                if (!error.cancelled) {
+                    console.error(error);
+                    invoice.error = error.message || 'No s’ha pogut processar el PDF.';
+                    failed++;
+                }
+            }
+
+            invoice.loading = false;
+            invoice.xhr = null;
+
+            rebuildItems();
+            displayResults();
         }
 
-        invoice.loading = false;
-        done++;
+    } finally {
 
-        rebuildItems();
-        displayResults();
+        busyCount--;
+
+        showLoading(false);
     }
 
-    showLoading(false);
-
     if (failed) {
-        showAlert('error', `❌ ${failed} de ${pending.length} PDF no s’han pogut llegir. Mira el missatge a la llista.`);
-    } else {
-        showAlert('success', pending.length > 1
-            ? `✅ ${pending.length} factures processades`
+        showAlert('error', `❌ ${failed} de ${done + failed} PDF no s’han pogut llegir. Mira el missatge a la llista.`);
+    } else if (done) {
+        showAlert('success', done > 1
+            ? `✅ ${done} factures processades`
             : '✅ Factura processada correctament');
     }
 }
 
 
-async function readInvoice(file) {
+/*
+ * Puja la factura i en retorna les dades. Si la connexió falla o el
+ * servidor no respon, ho torna a provar sola; si el servidor ha
+ * llegit el PDF i diu per què no va, no.
+ */
+async function readInvoice(invoice) {
 
-    const formData = new FormData();
+    if (invoice.file.size > MAX_UPLOAD_BYTES) {
+        throw new Error('El PDF fa més de 20 MB i el servidor no l’accepta.');
+    }
 
-    formData.append('file', file);
+    for (let attempt = 0; ; attempt++) {
 
-    const response = await fetch('/upload', {
-        method: 'POST',
-        body: formData
+        await waitUntilOnline(setLoadingDetail);
+
+        let data;
+
+        try {
+            data = await postInvoice(invoice);
+        } catch (error) {
+
+            if (!error.retry) {
+                throw error;
+            }
+
+            if (attempt >= UPLOAD_RETRY_WAITS.length) {
+                throw new Error('No s’ha pogut pujar: la connexió falla massa. Prem «Torna-ho a provar» quan vagi millor.');
+            }
+
+            await waitBeforeRetry(
+                UPLOAD_RETRY_WAITS[attempt],
+                seconds => setLoadingDetail(
+                    `${error.message} Ho torno a provar en ${seconds} s ` +
+                    `(intent ${attempt + 2} de ${UPLOAD_RETRY_WAITS.length + 1}).`
+                ),
+                invoice
+            );
+
+            // L'han treta de la llista mentre s'esperava.
+            if (!invoices.includes(invoice)) {
+                throw cancelledError();
+            }
+
+            continue;
+        }
+
+        if (!Array.isArray(data.items)) {
+            data.items = [];
+        }
+
+        data.items.forEach(item => {
+            item._id = nextItemId++;
+        });
+
+        return data;
+    }
+}
+
+
+/*
+ * Un intent de pujada, amb XMLHttpRequest perquè (a diferència de
+ * fetch) diu quant se n'ha pujat. Si falla, l'error porta
+ * retry = true quan és cosa de la connexió o de Render i val la pena
+ * tornar-ho a provar.
+ */
+function postInvoice(invoice) {
+
+    return new Promise((resolve, reject) => {
+
+        const file = invoice.file;
+        const xhr = new XMLHttpRequest();
+        const formData = new FormData();
+
+        let timer = null;
+        let ticker = null;
+        let settled = false;
+
+        formData.append('file', file);
+
+        // Per tallar-la si treuen la factura de la llista.
+        invoice.xhr = xhr;
+
+        function finish(error, data) {
+
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            clearTimeout(timer);
+            clearInterval(ticker);
+
+            if (error) {
+                reject(error);
+            } else {
+                resolve(data);
+            }
+        }
+
+        // Si en aquest temps no passa res, la connexió s'ha penjat.
+        function watchdog(ms) {
+
+            clearTimeout(timer);
+
+            timer = setTimeout(() => {
+                finish(retryableError('La connexió s’ha quedat penjada.'));
+                xhr.abort();
+            }, ms);
+        }
+
+        xhr.upload.onprogress = event => {
+
+            watchdog(UPLOAD_STALL_MS);
+
+            const total = event.lengthComputable && event.total ? event.total : file.size;
+            const percent = Math.min(100, Math.round(event.loaded / total * 100));
+
+            setLoadingDetail(`Pujant el PDF: ${formatSize(event.loaded)} de ${formatSize(total)} (${percent} %)`);
+        };
+
+        // Ja és al servidor: ara toca esperar l'OCR.
+        xhr.upload.onload = () => {
+
+            watchdog(PROCESSING_TIMEOUT_MS);
+
+            const start = Date.now();
+
+            const tick = () => {
+                const seconds = Math.round((Date.now() - start) / 1000);
+                setLoadingDetail(seconds < 60
+                    ? `Llegint la factura… ${seconds} s`
+                    : `Llegint la factura… ${seconds} s (si el servidor estava aturat, triga un minut més)`);
+            };
+
+            tick();
+            ticker = setInterval(tick, 1000);
+        };
+
+        xhr.onerror = () => finish(retryableError('S’ha perdut la connexió.'));
+
+        xhr.onabort = () => finish(cancelledError());
+
+        xhr.onload = () => {
+
+            let data = null;
+
+            try {
+                data = JSON.parse(xhr.responseText);
+            } catch (error) {
+                data = null;
+            }
+
+            // Resposta del nostre servidor: mana el que diu.
+            if (data && typeof data.success === 'boolean') {
+
+                if (data.success && xhr.status < 400) {
+                    finish(null, data);
+                } else {
+                    finish(new Error(data.error || 'No s’ha pogut processar el PDF.'));
+                }
+
+                return;
+            }
+
+            if (xhr.status === 413) {
+                finish(new Error('El PDF és massa gran per al servidor (màxim 20 MB).'));
+                return;
+            }
+
+            // Una pàgina d'error de Render o de Cloudflare (502, 503,
+            // 504, 524...): el servidor s'està despertant o ha caigut
+            // a mitja feina.
+            finish(retryableError(`El servidor no ha respost bé (codi ${xhr.status}).`));
+        };
+
+        xhr.open('POST', '/upload');
+
+        watchdog(UPLOAD_STALL_MS);
+
+        setLoadingDetail(`Pujant el PDF: 0 KB de ${formatSize(file.size)}`);
+
+        xhr.send(formData);
     });
+}
 
-    let data;
 
-    try {
-        data = await response.json();
-    } catch (error) {
-        throw new Error('El servidor ha retornat una resposta no vàlida.');
+function retryableError(message) {
+
+    const error = new Error(message);
+
+    error.retry = true;
+
+    return error;
+}
+
+
+function cancelledError() {
+
+    const error = new Error('Cancel·lat.');
+
+    error.cancelled = true;
+
+    return error;
+}
+
+
+/*
+ * Si el navegador sap que no hi ha connexió, s'espera que torni.
+ * Com a molt un minut: navigator.onLine no sempre l'encerta.
+ */
+function waitUntilOnline(say) {
+
+    if (navigator.onLine !== false) {
+        return Promise.resolve();
     }
 
-    if (!response.ok || !data.success) {
-        throw new Error(data.error || 'No s’ha pogut processar el PDF.');
-    }
+    say('Sense connexió: espero que torni…');
 
-    if (!Array.isArray(data.items)) {
-        data.items = [];
-    }
+    return new Promise(resolve => {
 
-    data.items.forEach(item => {
-        item._id = nextItemId++;
+        const done = () => {
+            clearTimeout(timer);
+            window.removeEventListener('online', done);
+            resolve();
+        };
+
+        const timer = setTimeout(done, 60 * 1000);
+
+        window.addEventListener('online', done);
     });
+}
 
-    return data;
+
+/*
+ * Compte enrere fins al pròxim intent. S'acaba abans si torna la
+ * connexió o si treuen la factura de la llista.
+ */
+function waitBeforeRetry(seconds, onTick, invoice) {
+
+    return new Promise(resolve => {
+
+        let left = seconds;
+
+        const done = () => {
+            clearInterval(timer);
+            window.removeEventListener('online', done);
+            if (invoice) {
+                invoice.stopWaiting = null;
+            }
+            resolve();
+        };
+
+        const timer = setInterval(() => {
+            left--;
+            if (left <= 0) {
+                done();
+            } else {
+                onTick(left);
+            }
+        }, 1000);
+
+        window.addEventListener('online', done);
+
+        if (invoice) {
+            invoice.stopWaiting = done;
+        }
+
+        onTick(left);
+    });
+}
+
+
+function formatSize(bytes) {
+
+    if (bytes >= 1024 * 1024) {
+        return (bytes / 1024 / 1024).toFixed(1).replace('.', ',') + ' MB';
+    }
+
+    return Math.round(bytes / 1024) + ' KB';
 }
 
 
@@ -1298,6 +1629,16 @@ function removeInvoice(id) {
     }
 
     invoices = invoices.filter(invoice => invoice.id !== id);
+
+    // Si s'estava pujant o esperant per tornar-ho a provar, es para:
+    // amb mala connexió no cal gastar-la en una factura treta.
+    if (removed && removed.xhr) {
+        removed.xhr.abort();
+    }
+
+    if (removed && removed.stopWaiting) {
+        removed.stopWaiting();
+    }
 
     rebuildItems();
     displayResults();
@@ -1438,9 +1779,21 @@ function renderTable() {
         }
 
         if (invoice.error) {
-            tbody.insertAdjacentHTML('beforeend', `
-                <tr><td colspan="9" class="empty-state error-text">❌ ${escapeHtml(invoice.error)}</td></tr>
-            `);
+
+            const row = document.createElement('tr');
+
+            row.innerHTML = `
+                <td colspan="9" class="empty-state error-text">
+                    ❌ ${escapeHtml(invoice.error)}
+                    <button type="button" class="btn btn-outline btn-sm invoice-retry">↻ Torna-ho a provar</button>
+                </td>
+            `;
+
+            row.querySelector('.invoice-retry').addEventListener('click', function () {
+                retryInvoice(invoice.id);
+            });
+
+            tbody.appendChild(row);
             return;
         }
 
@@ -1473,7 +1826,10 @@ function renderRow(item, index) {
     const price = parseAmount(item.price);
     const sheetPrice = sheetPriceFor(index);
 
-    const needsInput = price === null || item.check;
+    // Només quan la factura no porta cap preu llegible: sense preu no
+    // es pot enviar. Els avisos de preu que no quadrava amb l'import
+    // es van treure perquè eren falsos.
+    const needsInput = price === null;
 
     if (selected) {
         tr.classList.add('selected');
@@ -1485,12 +1841,9 @@ function renderRow(item, index) {
 
     const priceCell = needsInput
         ? `<input type="text" class="price-input" inputmode="decimal"
-                  value="${escapeHtml(price === null ? '' : String(item.price))}"
+                  value=""
                   placeholder="preu s/IVA"
-                  title="${price === null
-                      ? 'No s’ha trobat el preu sense IVA: escriu-lo'
-                      : 'El preu no quadra amb l’import: comprova’l a la factura'}">
-           <div class="check-note">⚠ revisa</div>`
+                  title="No s’ha trobat el preu sense IVA: escriu-lo">`
         : escapeHtml(formatMoney(price));
 
     tr.innerHTML = `
@@ -1542,7 +1895,6 @@ function renderRow(item, index) {
         priceInput.addEventListener('change', function () {
             const value = parseAmount(this.value);
             item.price = value === null ? '' : value.toFixed(2).replace('.', ',');
-            item.check = value === null;
             renderTable();
             updateSelectionUI();
         });
@@ -1820,6 +2172,43 @@ function itemToGoogleSheetRow(index) {
 }
 
 
+/*
+ * Amb mala connexió, un enviament pot arribar al full i perdre's la
+ * resposta. Tornar-lo a enviar a cegues duplicaria les línies (i la
+ * comissió). Per això cada tanda porta un identificador (batch_id):
+ * l'Apps Script recorda les tandes de les últimes 6 hores i, si en
+ * rep una de repetida, contesta el mateix sense tornar-la a escriure.
+ * L'Apps Script d'abans no ho fa: amb aquell no es reintenta i es
+ * demana mirar el full.
+ */
+
+// Segons d'espera abans de cada nou intent d'enviament.
+const SHEETS_RETRY_WAITS = [3, 8, 15, 30];
+
+// Google sol contestar en pocs segons: si en 90 no ha dit res, la
+// connexió s'ha perdut pel camí.
+const SHEETS_TIMEOUT_MS = 90 * 1000;
+
+// L'últim enviament sense confirmar. Si es torna a prémer el botó amb
+// les mateixes línies, es reaprofita el seu identificador: si ja
+// havia arribat, no es duplica.
+let unconfirmedBatch = null;
+
+// Si l'Apps Script desplegat reconeix les tandes repetides: true,
+// false o null (encara no se sap).
+let sheetsHandlesRepeats = null;
+
+
+function newBatchId() {
+
+    if (window.crypto && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+}
+
+
 async function exportSelectedToGoogleSheets() {
 
     if (!checkCanExport()) {
@@ -1857,6 +2246,144 @@ async function exportSelectedToGoogleSheets() {
         table_rows: getSelectedIndexes().map(itemToGoogleSheetRow)
     };
 
+    const signature = JSON.stringify(payload);
+
+    if (!unconfirmedBatch || unconfirmedBatch.signature !== signature) {
+        unconfirmedBatch = { signature: signature, id: newBatchId() };
+    }
+
+    payload.batch_id = unconfirmedBatch.id;
+
+    busyCount++;
+
+    try {
+
+        const result = await sendToSheets(payload, text => {
+            button.textContent = text;
+        });
+
+        unconfirmedBatch = null;
+
+        const halved = result.halved_rows
+            ? ` · ${result.halved_rows} dividides entre 2`
+            : '';
+
+        const repeated = result.repeated
+            ? ' (ja havien arribat al primer intent: no s’han duplicat)'
+            : '';
+
+        // L'Apps Script d'abans no torna el batch_id.
+        const oldScript = result.batch_id !== payload.batch_id
+            ? '. Cal actualitzar l’Apps Script.'
+            : '';
+
+        showAlert(
+            'success',
+            `✅ ${result.exported_rows} línia(es) enviades a ${result.person} (${result.sheet_name})${halved}${repeated}${oldScript}`
+        );
+
+    } catch (error) {
+
+        console.error(error);
+
+        if (!error.unknown) {
+
+            // L'Apps Script ha dit que no: no ha escrit res.
+            unconfirmedBatch = null;
+
+            showAlert(
+                'error',
+                '❌ Error de Google Sheets: ' +
+                (error.message || 'No s’ha pogut enviar la informació.')
+            );
+
+        } else if (sheetsHandlesRepeats) {
+
+            showAlert(
+                'error',
+                '❌ Google no respon. Torna a prémer el botó quan la connexió vagi millor: si ja havia arribat, no es duplicarà.',
+                20000
+            );
+
+        } else {
+
+            showAlert(
+                'error',
+                `❌ No s’ha pogut confirmar l’enviament per la connexió. Abans de tornar-lo a enviar, mira al full de ${payload.person} si les línies ja hi són, per no duplicar-les.`,
+                30000
+            );
+        }
+
+    } finally {
+
+        busyCount--;
+
+        button.dataset.sending = '';
+        button.textContent = originalText;
+        updateSheetsButton();
+    }
+}
+
+
+/*
+ * Envia la tanda i, si la connexió falla, la torna a enviar amb el
+ * mateix identificador mentre sigui segur (vegeu més amunt).
+ */
+async function sendToSheets(payload, say) {
+
+    for (let attempt = 0; ; attempt++) {
+
+        await waitUntilOnline(text => say('⏳ ' + text));
+
+        say(attempt ? `⏳ Enviant (intent ${attempt + 1})...` : '⏳ Enviant...');
+
+        try {
+
+            const result = await postToSheets(payload);
+
+            sheetsHandlesRepeats = result.batch_id === payload.batch_id;
+
+            return result;
+
+        } catch (error) {
+
+            // L'Apps Script ha contestat que no: tornar-ho a provar no
+            // canviaria la resposta. Si estava ocupat amb un altre
+            // enviament (busy), no ha escrit res i sí que es pot.
+            if (!error.unknown && !error.busy) {
+                throw error;
+            }
+
+            if (attempt >= SHEETS_RETRY_WAITS.length) {
+                throw error;
+            }
+
+            if (error.unknown && !(await repeatsAreSafe(say))) {
+                throw error;
+            }
+
+            await waitBeforeRetry(
+                SHEETS_RETRY_WAITS[attempt],
+                seconds => say(`⏳ Sense resposta. Reintent en ${seconds} s...`)
+            );
+        }
+    }
+}
+
+
+/*
+ * Un intent d'enviament. L'error porta unknown = true quan no se sap
+ * si ha arribat (la connexió s'ha tallat o Google no ha tornat cap
+ * resposta llegible) i busy = true quan l'Apps Script estava ocupat
+ * amb un altre enviament i no ha escrit res.
+ */
+async function postToSheets(payload) {
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SHEETS_TIMEOUT_MS);
+
+    let text;
+
     try {
 
         const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
@@ -1864,49 +2391,82 @@ async function exportSelectedToGoogleSheets() {
             headers: {
                 'Content-Type': 'text/plain;charset=utf-8'
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: controller.signal
         });
 
-        const text = await response.text();
-
-        let result;
-
-        try {
-            result = JSON.parse(text);
-        } catch (parseError) {
-            console.error('Resposta Google Apps Script:', text);
-            throw new Error('Google Apps Script no ha retornat un JSON vàlid.');
-        }
-
-        if (!result.ok) {
-            throw new Error(result.error || 'Error desconegut de Google Apps Script.');
-        }
-
-        const halved = result.halved_rows
-            ? ` · ${result.halved_rows} dividides entre 2`
-            : '';
-
-        showAlert(
-            'success',
-            `✅ ${result.exported_rows} línia(es) enviades a ${result.person} (${result.sheet_name})${halved}`
-        );
+        text = await response.text();
 
     } catch (error) {
 
-        console.error(error);
-
-        showAlert(
-            'error',
-            '❌ Error de Google Sheets: ' +
-            (error.message || 'No s’ha pogut enviar la informació.')
-        );
+        throw unknownError('S’ha perdut la connexió amb Google.');
 
     } finally {
 
-        button.dataset.sending = '';
-        button.textContent = originalText;
-        updateSheetsButton();
+        clearTimeout(timer);
     }
+
+    let result;
+
+    try {
+        result = JSON.parse(text);
+    } catch (parseError) {
+        console.error('Resposta Google Apps Script:', text);
+        throw unknownError('Google Apps Script no ha retornat un JSON vàlid.');
+    }
+
+    if (!result.ok) {
+        const error = new Error(result.error || 'Error desconegut de Google Apps Script.');
+        error.busy = result.busy === true;
+        throw error;
+    }
+
+    return result;
+}
+
+
+/*
+ * Pregunta a l'Apps Script (doGet) si reconeix les tandes repetides.
+ * Només cal quan un enviament s'ha quedat sense resposta.
+ */
+async function repeatsAreSafe(say) {
+
+    for (let attempt = 0; sheetsHandlesRepeats === null && attempt < 3; attempt++) {
+
+        say('⏳ Comprovant la connexió amb Google...');
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30 * 1000);
+
+        let info = null;
+
+        try {
+            const response = await fetch(GOOGLE_APPS_SCRIPT_URL, { signal: controller.signal });
+            info = JSON.parse(await response.text());
+        } catch (error) {
+            info = null;
+        }
+
+        clearTimeout(timer);
+
+        if (info) {
+            sheetsHandlesRepeats = info.repeats === true;
+        } else {
+            await waitBeforeRetry(5, seconds => say(`⏳ Google no respon. Reintent en ${seconds} s...`));
+        }
+    }
+
+    return sheetsHandlesRepeats === true;
+}
+
+
+function unknownError(message) {
+
+    const error = new Error(message);
+
+    error.unknown = true;
+
+    return error;
 }
 
 
@@ -2155,7 +2715,7 @@ function escapeHtml(value) {
 
 let alertTimer = null;
 
-function showAlert(type, message) {
+function showAlert(type, message, duration) {
 
     const alertBox = document.getElementById('alertBox');
 
@@ -2167,7 +2727,7 @@ function showAlert(type, message) {
 
     alertTimer = setTimeout(() => {
         alertBox.style.display = 'none';
-    }, type === 'error' ? 8000 : 6000);
+    }, duration || (type === 'error' ? 8000 : 6000));
 }
 
 
@@ -2175,6 +2735,13 @@ function showLoading(show) {
 
     document.getElementById('loadingBox').style.display =
         show ? 'block' : 'none';
+}
+
+
+// La línia petita de sota el títol: què s'està fent ara mateix.
+function setLoadingDetail(text) {
+
+    document.getElementById('loadingDetail').textContent = text;
 }
 
 

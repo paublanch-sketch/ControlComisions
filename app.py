@@ -995,11 +995,12 @@ def resolve_price_and_amount(monies, column_price, column_amount,
       1. La columna del preu, si no és el mateix número que l'import.
       2. Si l'OCR ha mogut el preu de columna: la primera xifra de la
          fila que no sigui l'import.
-      3. Res: el preu es queda buit i la línia es marca per revisar.
+      3. Res: el preu es queda buit perquè s'escrigui a mà.
 
-    Retorna (preu, import, revisar). "revisar" és True quan el preu no
-    quadra ni amb l'import ni amb l'IVA de la línia (vegeu
-    price_matches), per avisar a la pantalla.
+    Retorna (preu, import, falta_preu). Un preu que no quadra amb
+    l'import ni amb l'IVA no s'avisa: l'usuari va comprovar que
+    aquests avisos eren falsos (4/11/2026). price_matches només
+    serveix per triar entre la columna i la primera xifra.
     """
 
     amount_text = column_amount or (monies[-1][0] if monies else "")
@@ -1033,15 +1034,14 @@ def resolve_price_and_amount(monies, column_price, column_amount,
     if not price_text:
         return "", amount_text, True
 
-    check = not matches(money_to_float(price_text))
-
     # Si la columna no quadra però la primera xifra de la fila sí, és
     # que l'OCR ha mogut el preu de lloc.
-    if check and others and others[0][0] != price_text:
-        if matches(others[0][1]):
-            return others[0][0], amount_text, False
+    if (others and others[0][0] != price_text
+            and not matches(money_to_float(price_text))
+            and matches(others[0][1])):
+        return others[0][0], amount_text, False
 
-    return price_text, amount_text, check
+    return price_text, amount_text, False
 
 
 def parse_money(text):
@@ -1279,7 +1279,7 @@ def extract_items_from_words(words, patients=None, invoice_date=None):
         if not article:
             continue
 
-        price, amount, check = resolve_price_and_amount(
+        price, amount, missing_price = resolve_price_and_amount(
             row["monies"],
             row["price"],
             row["amount"],
@@ -1306,12 +1306,9 @@ def extract_items_from_words(words, patients=None, invoice_date=None):
             # Import final de la línia, amb IVA.
             "amount": amount,
 
-            # El preu no quadra amb l'import: cal mirar-lo.
-            "check": check,
-
             # La línia tal com es llegeix al PDF, per poder buscar-hi
             # el preu a mà quan no s'ha trobat.
-            "raw": row["raw"] if check else ""
+            "raw": row["raw"] if missing_price else ""
         })
 
     return items
