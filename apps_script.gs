@@ -109,8 +109,8 @@ function doPost(e) {
       ];
     });
 
-    // Troba la primera fila realment buida a la columna A
-    const nextRow = getNextAvailableRow(monthSheet);
+    // Primer tros buit on hi cap tota la tanda.
+    const nextRow = getNextAvailableRow(monthSheet, values.length);
 
     monthSheet.getRange(nextRow, 1, values.length, HEADERS.length).setValues(values);
 
@@ -195,24 +195,30 @@ function monthToSheetName(month) {
   return MONTH_NAMES[monthIndex] + ' ' + year;
 }
 
-// Cerca la primera fila buida a partir de DATA_START_ROW. Buida vol
-// dir sense res a DATA, FACTURA, DESCRIPCIÓ ni PREU: una fila que
-// només no té data no és lliure, i escriure-hi a sobre en perdria el
-// preu. La columna del 5% no compta (la plantilla hi pot tenir una
-// fórmula).
-function getNextAvailableRow(sheet) {
+// Primera fila d'un tros buit on hi cap tota la tanda. Buida vol dir
+// sense res a DATA, FACTURA, DESCRIPCIÓ ni PREU: una fila que només
+// no té data no és lliure, i escriure-hi a sobre en perdria el preu.
+// La columna del 5% no compta (la plantilla hi pot tenir una
+// fórmula). La tanda ocupa diverses files seguides: començant en un
+// forat més petit, trepitjaria les de sota.
+function getNextAvailableRow(sheet, count) {
   const lastRow = sheet.getLastRow();
   if (lastRow < DATA_START_ROW) return DATA_START_ROW;
 
   const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, 4).getValues();
+  let start = -1;
   for (let i = 0; i < rows.length; i++) {
     const empty = rows[i].every(value => value === '' || value === null || value === undefined);
-    if (empty) {
-      return DATA_START_ROW + i;
+    if (!empty) {
+      start = -1;
+      continue;
     }
+    if (start < 0) start = i;
+    if (i - start + 1 >= count) return DATA_START_ROW + start;
   }
 
-  return lastRow + 1;
+  // El forat del final continua per sota de l'última fila.
+  return start >= 0 ? DATA_START_ROW + start : lastRow + 1;
 }
 
 function writeTemplateHeader(sheet, person, month) {
