@@ -432,6 +432,37 @@ MONEY_RE = re.compile(
 
 DATE_RE = re.compile(r"\b(\d{2}/\d{2}/\d{4})\b")
 
+# La data d'una línia, tolerant amb l'OCR de les factures escanejades:
+# "8/09/2026", "08-09-2026", "08/09/ 2026", "O8/O9/2O26", o la data
+# enganxada al pacient ("08/09/2026SINDY").
+LOOSE_DATE_RE = re.compile(
+    r"(?<![\dA-Za-z])([0-3OoIl]?[\dOoIl])\s*[/\-.]\s*([01OoIl]?[\dOoIl])\s*[/\-.]\s*(2[0OoIl][\dOoIl]{2}|[\dOoIl]{2})(?![\dOoIl])"
+)
+
+
+def find_date(text):
+    """
+    Busca una data dd/mm/aaaa en un tros de text i la torna ben
+    escrita, o "" si no n'hi ha cap de vàlida.
+    """
+
+    for match in LOOSE_DATE_RE.finditer(text or ""):
+
+        parts = [
+            re.sub(r"[OoIl]", lambda m: "0" if m.group(0) in "Oo" else "1", p)
+            for p in match.groups()
+        ]
+
+        day, month, year = (int(p) for p in parts)
+
+        if year < 100:
+            year += 2000
+
+        if 1 <= day <= 31 and 1 <= month <= 12 and 2000 <= year <= 2100:
+            return f"{day:02d}/{month:02d}/{year}"
+
+    return ""
+
 
 def extract_total(text):
     """
@@ -890,29 +921,67 @@ def parse_quantity(text):
     return value if value > 0 else 1.0
 
 
-def price_matches(price, amount, quantity):
+def parse_vat_rate(text):
     """
-    Comprova que el preu sense IVA quadra amb l'import final de la
-    línia: preu x quantitat x (1 + IVA) = import.
+    "21%", "21 %", "10%" -> 0.21, 0.10. Si no n'hi ha, None.
     """
 
-    if price is None or amount is None:
+    match = re.search(r"(\d{1,2})(?:[.,]\d+)?\s*%", text or "")
+
+    return int(match.group(1)) / 100 if match else None
+
+
+def price_matches(price, amount, quantity, vat=None, vat_rate=None,
+                  quantity_known=True):
+    """
+    Comprova que el preu sense IVA quadra amb la resta de la línia:
+
+      - preu x quantitat x (1 + IVA%) = import, o
+      - preu x quantitat x IVA% = IVA de la línia, o
+      - preu x quantitat + IVA de la línia = import.
+
+    Amb una de les tres n'hi ha prou: si l'OCR llegeix malament
+    l'import, l'IVA encara confirma el preu (i al revés).
+    """
+
+    if price is None:
         return False
+
+    rates = (vat_rate,) if vat_rate is not None else VAT_RATES
 
     for quantity_option in {quantity, 1.0}:
 
         base = price * quantity_option
 
-        for rate in VAT_RATES:
+        if amount is not None:
+            for rate in VAT_RATES:
+                if abs(base * (1 + rate) - amount) <= 0.03 + amount * 0.0005:
+                    return True
 
-            if abs(base * (1 + rate) - amount) <= 0.03 + amount * 0.0005:
+        if vat is not None:
+
+            for rate in rates:
+                if rate and abs(base * rate - vat) <= 0.02 + vat * 0.001:
+                    return True
+
+            if amount is not None and abs(base + vat - amount) <= 0.03:
+                return True
+
+    # La quantitat no es pot llegir ("Z" per 2): l'import és el preu
+    # per un nombre sencer d'unitats, amb un dels IVA. Si la quantitat
+    # es llegeix, mana ella.
+    if not quantity_known and amount is not None and price > 0:
+        for rate in rates:
+            units = amount / (price * (1 + rate))
+            if 1.5 <= units <= 50 and abs(units - round(units)) <= 0.002 * units:
                 return True
 
     return False
 
 
 def resolve_price_and_amount(monies, column_price, column_amount,
-                             column_quantity=""):
+                             column_quantity="", column_vat="",
+                             column_vat_pct=""):
     """
     Decideix quin import és el PREU SENSE IVA i quin és l'import
     final de la línia.
@@ -929,8 +998,8 @@ def resolve_price_and_amount(monies, column_price, column_amount,
       3. Res: el preu es queda buit i la línia es marca per revisar.
 
     Retorna (preu, import, revisar). "revisar" és True quan el preu no
-    quadra amb l'import (preu x quantitat x (1 + IVA) = import), per
-    avisar a la pantalla.
+    quadra ni amb l'import ni amb l'IVA de la línia (vegeu
+    price_matches), per avisar a la pantalla.
     """
 
     amount_text = column_amount or (monies[-1][0] if monies else "")
@@ -945,6 +1014,13 @@ def resolve_price_and_amount(monies, column_price, column_amount,
     ]
 
     quantity = parse_quantity(column_quantity)
+    quantity_known = bool(re.search(r"\d", column_quantity or ""))
+    vat = money_to_float(column_vat)
+    vat_rate = parse_vat_rate(column_vat_pct)
+
+    def matches(value):
+        return price_matches(value, amount, quantity, vat, vat_rate,
+                             quantity_known)
 
     price_text = ""
 
@@ -957,12 +1033,12 @@ def resolve_price_and_amount(monies, column_price, column_amount,
     if not price_text:
         return "", amount_text, True
 
-    check = not price_matches(money_to_float(price_text), amount, quantity)
+    check = not matches(money_to_float(price_text))
 
     # Si la columna no quadra però la primera xifra de la fila sí, és
     # que l'OCR ha mogut el preu de lloc.
     if check and others and others[0][0] != price_text:
-        if price_matches(others[0][1], amount, quantity):
+        if matches(others[0][1]):
             return others[0][0], amount_text, False
 
     return price_text, amount_text, check
@@ -981,45 +1057,34 @@ def parse_money(text):
     return match.group(1) if match else ""
 
 
-def extract_items_from_words(words, patients=None):
+def read_table_rows(lines, columns, patient_names):
     """
-    Llegeix la taula de conceptes fent servir les COLUMNES.
+    Les files d'una pàgina de la taula, de dalt a baix fins al peu
+    ("Total", "Pagos", "ANICURA SPAIN"...).
 
-    Regles:
-
-    - Cada fila real de la factura porta un pacient i un import.
-    - La data pot faltar: llavors s'hereta de la fila anterior.
-    - Un article pot ocupar dues línies. Aquesta segona línia
-      no porta ni pacient ni imports, i pot quedar per SOBRE o
-      per SOTA de la fila. S'assigna a la fila més propera
-      verticalment, que és sempre la seva.
+    Un article pot ocupar dues línies. Aquesta segona línia no porta
+    ni pacient ni imports, i pot quedar per SOBRE o per SOTA de la
+    fila. S'assigna a la fila més propera verticalment, que és
+    sempre la seva.
     """
-
-    lines = group_lines(words)
-
-    if not lines:
-        return []
-
-    header_index, columns = find_header(lines)
-
-    if columns is None:
-        return []
-
-    columns = refine_article_boundary(
-        lines[header_index + 1:],
-        columns
-    )
-
-    patient_names = [
-        p.upper()
-        for p in (patients or [])
-        if p
-    ]
 
     rows = []
     fragments = []
 
-    for line in lines[header_index + 1:]:
+    # Dates que l'OCR ha deixat en una línia a part (una mica més
+    # amunt o avall que la resta de la fila).
+    date_fragments = []
+
+    heights = sorted(
+        w["y1"] - w["y0"]
+        for line in lines
+        for w in line
+        if w["y1"] > w["y0"]
+    )
+
+    line_height = heights[len(heights) // 2] if heights else 10.0
+
+    for line in lines:
 
         text = line_text(line)
 
@@ -1051,15 +1116,18 @@ def extract_items_from_words(words, patients=None):
 
             rows.append({
                 "center": line_center(line),
+                # A la columna de la data; si l'OCR l'ha partit o
+                # l'ha enganxat al pacient, entre totes dues.
                 "date": (
-                    DATE_RE.search(cells.get("date", "")).group(1)
-                    if DATE_RE.search(cells.get("date", ""))
-                    else ""
+                    find_date(cells.get("date", ""))
+                    or find_date(cells.get("date", "") + " " + patient_cell)
                 ),
                 "patient": patient_cell,
                 "article": clean_article(cells.get("article", "")),
                 "price": parse_money(cells.get("price", "")),
                 "quantity": cells.get("quantity", ""),
+                "vat": parse_money(cells.get("vat", "")),
+                "vat_pct": cells.get("vat_pct", ""),
                 "raw": text,
                 "amount": parse_money(amount_cell),
                 "monies": row_money_values(line),
@@ -1067,40 +1135,108 @@ def extract_items_from_words(words, patients=None):
                 "suffix": []
             })
 
-        elif cells.get("article", "").strip():
+        else:
 
-            fragments.append({
-                "center": line_center(line),
-                "text": clean_article(cells["article"])
-            })
+            if find_date(cells.get("date", "")):
+                date_fragments.append({
+                    "center": line_center(line),
+                    "date": find_date(cells["date"])
+                })
+
+            if cells.get("article", "").strip():
+                fragments.append({
+                    "center": line_center(line),
+                    "text": clean_article(cells["article"])
+                })
 
     if not rows:
         return []
 
-    # ------------------------------------------------------------
-    # Assignem cada tros d'article a la fila més propera.
-    # ------------------------------------------------------------
-
     for fragment in fragments:
 
-        best = None
-        best_distance = None
+        best = min(
+            rows,
+            key=lambda row: abs(row["center"] - fragment["center"])
+        )
 
-        for position, row in enumerate(rows):
+        if fragment["center"] < best["center"]:
+            best["prefix"].append(fragment["text"])
+        else:
+            best["suffix"].append(fragment["text"])
 
-            distance = abs(row["center"] - fragment["center"])
+    # Cada data solta va a la fila sense data que tingui just al
+    # costat. Més lluny no és d'aquella fila (pot ser la data de la
+    # capçalera d'una pàgina).
+    for fragment in date_fragments:
 
-            if best_distance is None or distance < best_distance:
-                best = position
-                best_distance = distance
+        free = [
+            row for row in rows
+            if not row["date"]
+            and abs(row["center"] - fragment["center"]) <= line_height * 2
+        ]
 
-        if best is None:
+        if free:
+            nearest = min(free, key=lambda row: abs(row["center"] - fragment["center"]))
+            nearest["date"] = fragment["date"]
+
+    return rows
+
+
+def extract_items_from_words(words, patients=None, invoice_date=None):
+    """
+    Llegeix la taula de conceptes fent servir les COLUMNES.
+
+    Regles:
+
+    - Cada fila real de la factura porta un pacient i un import.
+    - La data pot faltar: llavors s'hereta de la fila anterior.
+    - La taula es llegeix pàgina per pàgina. Cada pàgina acaba al
+      seu peu, i la següent torna a començar a la seva capçalera
+      (o, si no en té, amb les columnes de l'anterior).
+    """
+
+    patient_names = [
+        p.upper()
+        for p in (patients or [])
+        if p
+    ]
+
+    pages = {}
+
+    for word in words:
+        pages.setdefault(word.get("page", 1), []).append(word)
+
+    rows = []
+    columns = None
+
+    for page_number in sorted(pages):
+
+        lines = group_lines(pages[page_number])
+
+        if not lines:
             continue
 
-        if fragment["center"] < rows[best]["center"]:
-            rows[best]["prefix"].append(fragment["text"])
+        header_index, page_columns = find_header(lines)
+
+        if page_columns is not None:
+
+            data_lines = lines[header_index + 1:]
+
+            columns = refine_article_boundary(data_lines, page_columns)
+
+        elif columns is not None:
+
+            # Pàgina de continuació sense capçalera: la taula té
+            # les mateixes columnes que a la pàgina anterior.
+            data_lines = lines
+
         else:
-            rows[best]["suffix"].append(fragment["text"])
+            continue
+
+        rows.extend(read_table_rows(data_lines, columns, patient_names))
+
+    if not rows:
+        return []
 
     # ------------------------------------------------------------
     # Muntem el resultat final.
@@ -1108,12 +1244,23 @@ def extract_items_from_words(words, patients=None):
 
     items = []
 
+    # Una fila sense data és del mateix dia que la d'abans (la
+    # factura només escriu la data a la primera línia de cada dia).
+    # Si és la primera, la de la fila següent que en tingui.
+    following_date = next((row["date"] for row in rows if row["date"]), "")
     previous_date = ""
     previous_patient = ""
 
     for row in rows:
 
-        date = row["date"] or previous_date
+        date = row["date"] or previous_date or following_date
+
+        # Cap línia porta una data que es pugui llegir: la de la
+        # factura, i es diu a la pantalla.
+        date_from_invoice = not date and bool(invoice_date)
+
+        if date_from_invoice:
+            date = invoice_date
 
         if row["date"]:
             previous_date = row["date"]
@@ -1136,7 +1283,9 @@ def extract_items_from_words(words, patients=None):
             row["monies"],
             row["price"],
             row["amount"],
-            row["quantity"]
+            row["quantity"],
+            row["vat"],
+            row["vat_pct"]
         )
 
         # Si no hi ha preu, la línia surt igualment amb el preu buit
@@ -1146,6 +1295,7 @@ def extract_items_from_words(words, patients=None):
 
         items.append({
             "date": date,
+            "date_from_invoice": date_from_invoice,
             "patient": patient,
             "article": article,
 
@@ -1221,7 +1371,7 @@ def upload():
         total = extract_total(normalized)
         patients = extract_patients(normalized)
 
-        items = extract_items_from_words(words, patients)
+        items = extract_items_from_words(words, patients, invoice_date)
 
         # Si l'OCR no ha llegit bé la capçalera i no hem pogut
         # detectar el pacient, la taula igualment es llegeix per

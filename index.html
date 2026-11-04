@@ -462,6 +462,18 @@
             color: var(--muted);
         }
 
+        /* La línia no portava data: és la de la factura. */
+        td.date .from-invoice {
+            font-style: italic;
+            border-bottom: 1px dotted currentColor;
+            cursor: help;
+        }
+
+        td.date .no-date {
+            color: var(--amber);
+            font-weight: 600;
+        }
+
         tbody tr {
             cursor: pointer;
             transition: background 0.12s;
@@ -1485,7 +1497,13 @@ function renderRow(item, index) {
         <td class="check">
             <input type="checkbox" class="row-check" ${selected ? 'checked' : ''}>
         </td>
-        <td class="date">${escapeHtml(item.date || '')}</td>
+        <td class="date">${
+            !item.date
+                ? '<span class="no-date" title="No s’ha pogut llegir la data">sense data</span>'
+                : item.date_from_invoice
+                    ? `<span class="from-invoice" title="La línia no porta data llegible: és la data de la factura">${escapeHtml(item.date)}</span>`
+                    : escapeHtml(item.date)
+        }</td>
         <td>${escapeHtml(item.patient || '')}</td>
         <td class="article-cell">${escapeHtml(item.article || '')}${needsInput ? `
             <div class="raw-line">
@@ -1719,6 +1737,19 @@ function checkCanExport() {
         showAlert(
             'error',
             `❌ Falta el preu sense IVA a ${withoutPrice.length} línia(es) seleccionades: escriu-lo a la casella groga.`
+        );
+        return false;
+    }
+
+    // Al full, una fila sense data es veu com a buida i el següent
+    // enviament hi escriuria a sobre.
+    const withoutDate = getSelectedIndexes()
+        .filter(index => !currentData.items[index].date);
+
+    if (withoutDate.length) {
+        showAlert(
+            'error',
+            `❌ ${withoutDate.length} línia(es) seleccionades no tenen data: treu-les de la selecció o torna a pujar la factura.`
         );
         return false;
     }

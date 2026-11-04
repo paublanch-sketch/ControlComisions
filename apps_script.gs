@@ -195,14 +195,19 @@ function monthToSheetName(month) {
   return MONTH_NAMES[monthIndex] + ' ' + year;
 }
 
-// Cerca la primera fila de la Columna A (Data) que estigui buida a partir de DATA_START_ROW
+// Cerca la primera fila buida a partir de DATA_START_ROW. Buida vol
+// dir sense res a DATA, FACTURA, DESCRIPCIÓ ni PREU: una fila que
+// només no té data no és lliure, i escriure-hi a sobre en perdria el
+// preu. La columna del 5% no compta (la plantilla hi pot tenir una
+// fórmula).
 function getNextAvailableRow(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < DATA_START_ROW) return DATA_START_ROW;
 
-  const dates = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, 1).getValues();
-  for (let i = 0; i < dates.length; i++) {
-    if (dates[i][0] === '' || dates[i][0] === null || dates[i][0] === undefined) {
+  const rows = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, 4).getValues();
+  for (let i = 0; i < rows.length; i++) {
+    const empty = rows[i].every(value => value === '' || value === null || value === undefined);
+    if (empty) {
       return DATA_START_ROW + i;
     }
   }
